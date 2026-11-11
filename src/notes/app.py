@@ -1,12 +1,17 @@
-"""HTTP API: notes CRUD, tags, search."""
+"""HTTP API: notes CRUD, tags, search, CSV export."""
 
+import csv
+import io
+import json
 import os
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from notes.db import Database
+
+EXPORT_FIELDS = ("id", "title", "body", "tags", "created_at", "updated_at")
 
 
 class NoteIn(BaseModel):
@@ -86,6 +91,116 @@ def create_app(db: Database | None = None) -> FastAPI:
             "SELECT id FROM notes WHERE title LIKE ? OR body LIKE ? ORDER BY id", (like, like)
         )
         return [load(db, r["id"]) for r in rows.fetchall()]
+
+    def export_notes(db: Database, selected: list[str], tag: str | None) -> Response:
+        columns = [field for field in EXPORT_FIELDS if field in selected]
+        if tag:
+            rows = db.conn.execute(
+                """SELECT notes.* FROM notes JOIN tags ON tags.note_id = notes.id
+                WHERE tags.tag = ? ORDER BY notes.id""",
+                (tag.lower(),),
+            ).fetchall()
+        else:
+            rows = db.conn.execute("SELECT * FROM notes ORDER BY id").fetchall()
+
+        tags_by_id: dict[int, list[str]] = {}
+        for tag_row in db.conn.execute("SELECT note_id, tag FROM tags ORDER BY note_id, tag"):
+            tags_by_id.setdefault(tag_row["note_id"], []).append(tag_row["tag"])
+
+        output = io.StringIO(newline="")
+        writer = csv.writer(output, lineterminator="\r\n")
+        writer.writerow(columns)
+        for row in rows:
+            values = {field: row[field] for field in columns if field != "tags"}
+            if "tags" in columns:
+                values["tags"] = json.dumps(
+                    tags_by_id.get(row["id"], []), separators=(",", ":")
+                )
+            writer.writerow([values[field] for field in columns])
+
+        return Response(
+            content=output.getvalue().encode(),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": 'attachment; filename="notes.csv"',
+                "Cache-Control": "no-store",
+            },
+        )
+
+    @app.get(
+        "/notes/export",
+        operation_id="export-notes",
+        responses={
+            200: {
+                "description": "Complete UTF-8 CSV with selected headings; may have zero records.",
+                "content": {"text/csv": {"schema": {"type": "string", "format": "binary"}}},
+                "headers": {
+                    "Content-Disposition": {
+                        "required": True,
+                        "schema": {"type": "string", "const": 'attachment; filename="notes.csv"'},
+                    },
+                    "Cache-Control": {
+                        "required": True,
+                        "schema": {"type": "string", "const": "no-store"},
+                    },
+                },
+            },
+            422: {
+                "description": "Invalid field selection or repeated tag; no attachment.",
+                "content": {
+                    "application/json": {
+                        "schema": {"$ref": "#/components/schemas/HTTPValidationError"}
+                    }
+                },
+            },
+        },
+    )
+    def export(
+        request: Request,
+        db: DB,
+        fields: Annotated[
+            list[str],
+            Query(
+                description="Repeat for each field; duplicate fields are exported once.",
+                json_schema_extra={
+                    "minItems": 1,
+                    "items": {"type": "string", "enum": list(EXPORT_FIELDS)},
+                },
+            ),
+        ],
+        tag: Annotated[
+            str | None,
+            Query(description="At most one tag; omitted or empty selects all notes."),
+        ] = None,
+    ) -> Response:
+        if len(request.query_params.getlist("tag")) > 1:
+            raise HTTPException(
+                422,
+                detail=[
+                    {
+                        "loc": ["query", "tag"],
+                        "msg": "Only one tag is supported",
+                        "type": "value_error",
+                    }
+                ],
+            )
+        errors = [
+            {
+                "loc": ["query", "fields", index],
+                "msg": (
+                    "Export field must not be empty"
+                    if not field
+                    else f"Unknown export field: {field}"
+                ),
+                "type": "value_error",
+                "input": field,
+            }
+            for index, field in enumerate(fields)
+            if field not in EXPORT_FIELDS
+        ]
+        if errors:
+            raise HTTPException(422, detail=errors)
+        return export_notes(db, fields, tag)
 
     @app.get("/notes/{note_id}")
     def get(note_id: int, db: DB) -> Note:
