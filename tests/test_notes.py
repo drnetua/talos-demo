@@ -229,3 +229,46 @@ def test_no_tag_cursor_with_tag_is_422_and_empty_tag_is_no_filter() -> None:
     assert r.status_code == 422
     assert r.json() == {"detail": "page cursor does not match the tag filter"}
     assert c.get(f"/notes?tag=&cursor={cursor}").status_code == 200
+
+
+NOTE_FIELDS = {"id", "title", "body", "tags", "created_at", "updated_at"}
+
+
+def _seed_matching(c: TestClient, n: int) -> None:
+    for i in range(n):
+        c.post("/notes", json={"title": f"n{i}", "body": "findme"})
+
+
+def test_search_unpaginated() -> None:
+    c = client()
+    _seed_matching(c, 60)
+    c.post("/notes", json={"title": "other", "body": "nothing"})
+    r = c.get("/notes/search?q=findme")
+    assert r.status_code == 200
+    body = r.json()
+    assert isinstance(body, list)
+    ids = [n["id"] for n in body]
+    assert ids == list(range(1, 61))
+    assert all(set(n) == NOTE_FIELDS for n in body)
+
+
+def test_search_ignores_paging_parameters() -> None:
+    c = client()
+    _seed_matching(c, 60)
+    r = c.get("/notes/search?q=findme&limit=1&cursor=x")
+    assert r.status_code == 200
+    assert isinstance(r.json(), list)
+    assert [n["id"] for n in r.json()] == list(range(1, 61))
+
+
+def test_tags_unpaginated() -> None:
+    c = client()
+    for i in range(60):
+        tags = [f"t{i:02d}"] + (["shared"] if i % 2 == 0 else [])
+        c.post("/notes", json={"title": f"n{i}", "tags": tags})
+    r = c.get("/tags")
+    assert r.status_code == 200
+    expected = [{"tag": f"t{i:02d}", "count": 1} for i in range(60)]
+    expected.append({"tag": "shared", "count": 30})
+    assert r.json() == sorted(expected, key=lambda t: str(t["tag"]))
+    assert isinstance(r.json(), list)
