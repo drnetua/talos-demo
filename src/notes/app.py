@@ -87,9 +87,11 @@ def create_app(db: Database | None = None) -> FastAPI:
         position = 0
         if cursor is not None:
             try:
-                position, _ = decode_cursor(cursor, cursor_secret)
+                position, cursor_tag = decode_cursor(cursor, cursor_secret)
             except ValueError:
                 raise HTTPException(422, "invalid page cursor") from None
+            if cursor_tag != tag_filter:
+                raise HTTPException(422, "page cursor does not match the tag filter")
         if tag_filter:
             rows = db.conn.execute(
                 "SELECT note_id AS id FROM tags WHERE tag = ? AND note_id > ?"

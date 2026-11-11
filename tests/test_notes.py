@@ -147,3 +147,43 @@ def test_bad_cursor_is_422() -> None:
     for bad in ("garbage", "a.b", f"{payload}.{sig[:-2]}xx", f"{payload}x.{sig}", ".", "x."):
         r = c.get("/notes", params={"cursor": bad})
         assert r.status_code == 422 and r.json() == {"detail": "invalid page cursor"}
+
+
+def _tag_client() -> TestClient:
+    c = client()
+    for i in range(7):
+        c.post("/notes", json={"title": f"n{i}", "tags": ["work"] if i % 2 == 0 else ["home"]})
+    return c
+
+
+def test_tag_page_has_cursor_and_only_tag_notes() -> None:
+    c = _tag_client()
+    r = c.get("/notes?tag=work&limit=2")
+    assert _ids(r) == [1, 3] and r.json()["next_cursor"]
+    assert all("work" in n["tags"] for n in r.json()["items"])
+
+
+def test_tag_walk_any_case_returns_each_once() -> None:
+    c = _tag_client()
+    assert _walk(c, "tag=work&limit=2") == [1, 3, 5, 7]
+    assert _walk(c, "tag=WORK&limit=3") == [1, 3, 5, 7]
+    cursor = c.get("/notes?tag=work&limit=2").json()["next_cursor"]
+    assert _ids(c.get(f"/notes?tag=WORK&limit=2&cursor={cursor}")) == [5, 7]
+
+
+def test_cursor_with_other_tag_or_no_tag_is_422() -> None:
+    c = _tag_client()
+    cursor = c.get("/notes?tag=work&limit=2").json()["next_cursor"]
+    for query in ("tag=home", ""):
+        r = c.get(f"/notes?{query}&cursor={cursor}")
+        assert r.status_code == 422
+        assert r.json() == {"detail": "page cursor does not match the tag filter"}
+
+
+def test_no_tag_cursor_with_tag_is_422_and_empty_tag_is_no_filter() -> None:
+    c = _tag_client()
+    cursor = c.get("/notes?limit=2").json()["next_cursor"]
+    r = c.get(f"/notes?tag=work&cursor={cursor}")
+    assert r.status_code == 422
+    assert r.json() == {"detail": "page cursor does not match the tag filter"}
+    assert c.get(f"/notes?tag=&cursor={cursor}").status_code == 200
