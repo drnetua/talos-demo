@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
+from notes.cursor import decode_cursor, encode_cursor, get_secret
 from notes.db import Database
 
 
@@ -29,6 +30,7 @@ class NotesPage(BaseModel):
 def create_app(db: Database | None = None) -> FastAPI:
     app = FastAPI(title="talos-demo notes")
     app.state.db = db or Database(os.environ.get("NOTES_DB", "notes.sqlite3"))
+    cursor_secret = get_secret()
 
     def get_db() -> Database:
         database: Database = app.state.db
@@ -76,16 +78,34 @@ def create_app(db: Database | None = None) -> FastAPI:
 
     @app.get("/notes", operation_id="list-notes")
     def list_notes(
-        db: DB, tag: str | None = None, limit: Annotated[int, Query(ge=1, le=100)] = 50
+        db: DB,
+        tag: str | None = None,
+        limit: Annotated[int, Query(ge=1, le=100)] = 50,
+        cursor: Annotated[str, Query(min_length=1)] | None = None,
     ) -> NotesPage:
-        if tag:
+        tag_filter = tag.lower() if tag else None
+        position = 0
+        if cursor is not None:
+            try:
+                position, _ = decode_cursor(cursor, cursor_secret)
+            except ValueError:
+                raise HTTPException(422, "invalid page cursor") from None
+        if tag_filter:
             rows = db.conn.execute(
-                "SELECT note_id AS id FROM tags WHERE tag = ? ORDER BY note_id LIMIT ?",
-                (tag.lower(), limit),
+                "SELECT note_id AS id FROM tags WHERE tag = ? AND note_id > ?"
+                " ORDER BY note_id LIMIT ?",
+                (tag_filter, position, limit + 1),
             )
         else:
-            rows = db.conn.execute("SELECT id FROM notes ORDER BY id LIMIT ?", (limit,))
-        return NotesPage(items=[load(db, r["id"]) for r in rows.fetchall()])
+            rows = db.conn.execute(
+                "SELECT id FROM notes WHERE id > ? ORDER BY id LIMIT ?", (position, limit + 1)
+            )
+        ids = [r["id"] for r in rows.fetchall()]
+        page_ids = ids[:limit]
+        next_cursor = (
+            encode_cursor(page_ids[-1], tag_filter, cursor_secret) if len(ids) > limit else None
+        )
+        return NotesPage(items=[load(db, i) for i in page_ids], next_cursor=next_cursor)
 
     @app.get("/notes/search")
     def search(db: DB, q: Annotated[str, Query(min_length=1)]) -> list[Note]:

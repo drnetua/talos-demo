@@ -47,7 +47,7 @@ def test_default_page_is_bounded() -> None:
     r = c.get("/notes")
     assert r.status_code == 200
     assert len(r.json()["items"]) == 50
-    assert r.json()["next_cursor"] is None
+    assert r.json()["next_cursor"] is not None
 
 
 def test_limit_page() -> None:
@@ -88,3 +88,62 @@ def test_openapi_list_notes() -> None:
     assert op["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
         "/NotesPage"
     )
+
+
+def _ids(r: object) -> list[int]:
+    return [n["id"] for n in r.json()["items"]]  # type: ignore[attr-defined]
+
+
+def _walk(c: TestClient, query: str) -> list[int]:
+    ids: list[int] = []
+    url = f"/notes?{query}"
+    for _ in range(100):
+        body = c.get(url).json()
+        ids += [n["id"] for n in body["items"]]
+        if body["next_cursor"] is None:
+            return ids
+        url = f"/notes?{query}&cursor={body['next_cursor']}"
+    raise AssertionError("walk did not end")
+
+
+def test_cursor_continues_after_last_id() -> None:
+    c = client()
+    _seed(c, 5)
+    first = c.get("/notes?limit=2")
+    assert len(_ids(first)) == 2 and first.json()["next_cursor"]
+    second = c.get(f"/notes?limit=2&cursor={first.json()['next_cursor']}")
+    assert _ids(second) == [3, 4]
+    last = c.get(f"/notes?limit=2&cursor={second.json()['next_cursor']}")
+    assert _ids(last) == [5] and last.json()["next_cursor"] is None
+
+
+def test_exact_fill_has_no_cursor() -> None:
+    c = client()
+    _seed(c, 4)
+    assert c.get("/notes?limit=4").json()["next_cursor"] is None
+
+
+def test_full_walk_every_id_once_and_repeatable() -> None:
+    c = client()
+    _seed(c, 11)
+    walk = _walk(c, "limit=3")
+    assert walk == list(range(1, 12))
+    assert _walk(c, "limit=3") == walk
+    assert _walk(c, "limit=4") == walk
+
+
+def test_full_walk_with_tag() -> None:
+    c = client()
+    for i in range(9):
+        c.post("/notes", json={"title": f"n{i}", "tags": ["Work"] if i % 2 == 0 else []})
+    assert _walk(c, "tag=WORK&limit=2") == [1, 3, 5, 7, 9]
+
+
+def test_bad_cursor_is_422() -> None:
+    c = client()
+    _seed(c, 5)
+    good = c.get("/notes?limit=2").json()["next_cursor"]
+    payload, sig = good.split(".")
+    for bad in ("garbage", "a.b", f"{payload}.{sig[:-2]}xx", f"{payload}x.{sig}", ".", "x."):
+        r = c.get("/notes", params={"cursor": bad})
+        assert r.status_code == 422 and r.json() == {"detail": "invalid page cursor"}
