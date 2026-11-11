@@ -1,3 +1,5 @@
+import base64
+
 from fastapi.testclient import TestClient
 
 from notes.app import create_app
@@ -144,9 +146,49 @@ def test_bad_cursor_is_422() -> None:
     _seed(c, 5)
     good = c.get("/notes?limit=2").json()["next_cursor"]
     payload, sig = good.split(".")
-    for bad in ("garbage", "a.b", f"{payload}.{sig[:-2]}xx", f"{payload}x.{sig}", ".", "x."):
+    for bad in (
+        "",
+        "garbage",
+        "é.é",
+        "a.b",
+        payload,
+        f"{payload}.",
+        f"{payload}.{sig[:5]}",
+        "a.b",
+        f"{payload}.{sig[:-2]}xx",
+        f"{payload}x.{sig}",
+        ".",
+        "x.",
+    ):
         r = c.get("/notes", params={"cursor": bad})
         assert r.status_code == 422 and r.json() == {"detail": "invalid page cursor"}
+
+
+def test_invalid_limit_is_422_without_items() -> None:
+    c = client()
+    _seed(c, 3)
+    for bad in ("0", "-1", "-5", "abc", "1.5"):
+        r = c.get("/notes", params={"limit": bad})
+        assert r.status_code == 422
+        assert r.json()["detail"][0]["loc"] == ["query", "limit"]
+        assert "items" not in r.json()
+
+
+def test_tampered_payload_cursor_is_422() -> None:
+    c = client()
+    _seed(c, 5)
+    payload, sig = c.get("/notes?limit=2").json()["next_cursor"].split(".")
+    forged = base64.urlsafe_b64encode(b'{"a":0,"t":null}').decode().rstrip("=")
+    r = c.get("/notes", params={"cursor": f"{forged}.{sig}"})
+    assert r.status_code == 422 and r.json() == {"detail": "invalid page cursor"}
+    assert "items" not in r.json()
+
+
+def test_openapi_cursor_min_length_and_422() -> None:
+    op = client().get("/openapi.json").json()["paths"]["/notes"]["get"]
+    cursor = next(p for p in op["parameters"] if p["name"] == "cursor")["schema"]
+    assert any(v.get("minLength") == 1 for v in cursor.get("anyOf", [cursor]))
+    assert "422" in op["responses"]
 
 
 def _tag_client() -> TestClient:

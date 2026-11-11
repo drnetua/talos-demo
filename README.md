@@ -15,14 +15,14 @@ Test project for TalosSDLC runs (roadmap SP4): a small notes service with tags.
 ## Paging
 
 `GET /notes` returns `{"items": [...], "next_cursor": "..."}`. `limit` defaults to 50 and
-must be 1..100; a larger value is rejected with 422. Notes are ordered by id. This is a
+must be 1..100; zero, a negative, a non-number or a larger value is rejected with 422. Notes are ordered by id. This is a
 breaking change (adr-0008): existing clients must read `items` instead of the root array.
 
 To read all notes, follow `next_cursor` until it is `null`: pass it back unchanged as
 `cursor` (with the same `tag`) and never parse it. The last page has `next_cursor: null`.
 A cursor is valid only with the `tag` it was issued under (or none); a mismatch is
 rejected with 422 `{"detail": "page cursor does not match the tag filter"}`.
-A garbled or altered cursor is rejected with 422 `{"detail": "invalid page cursor"}`.
+An empty, garbled or altered cursor is rejected with 422 `{"detail": "invalid page cursor"}`.
 
 Cursors are signed with `NOTES_CURSOR_SECRET`. Set it when running several workers or
 restarts must keep cursors valid; otherwise a random key is generated per process.

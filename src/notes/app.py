@@ -81,14 +81,14 @@ def create_app(db: Database | None = None) -> FastAPI:
         db: DB,
         tag: str | None = None,
         limit: Annotated[int, Query(ge=1, le=100)] = 50,
-        cursor: Annotated[str, Query(min_length=1)] | None = None,
+        cursor: Annotated[str, Query(json_schema_extra={"minLength": 1})] | None = None,
     ) -> NotesPage:
         tag_filter = tag.lower() if tag else None
         position = 0
         if cursor is not None:
             try:
                 position, cursor_tag = decode_cursor(cursor, cursor_secret)
-            except ValueError:
+            except (ValueError, TypeError):  # TypeError: non-ASCII text in compare_digest
                 raise HTTPException(422, "invalid page cursor") from None
             if cursor_tag != tag_filter:
                 raise HTTPException(422, "page cursor does not match the tag filter")
