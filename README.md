@@ -6,11 +6,18 @@ Test project for TalosSDLC runs (roadmap SP4): a small notes service with tags.
 |---|---|---|
 | GET | /health | liveness |
 | POST | /notes | create a note (title, body, tags) |
-| GET | /notes?tag= | list, optionally by tag |
+| GET | /notes?tag=&limit= | Notes page, optionally by tag |
 | GET | /notes/search?q= | search in title and body |
 | GET / PUT / DELETE | /notes/{id} | read, update, delete |
 | GET | /tags | tags with counts |
 | POST / DELETE | /notes/{id}/tags/{tag} | add / remove a tag |
+
+## Paging
+
+`GET /notes` returns `{"items": [...], "next_cursor": null}`. `limit` defaults to 50 and
+must be 1..100; a larger value is rejected with 422. Notes are ordered by id. This is a
+breaking change (adr-0008): existing clients must read `items` instead of the root array.
+`next_cursor` is always `null` for now; the cursor loop is documented by the cursor story.
 
 ```bash
 uv sync

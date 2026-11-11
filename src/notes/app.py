@@ -21,6 +21,11 @@ class Note(NoteIn):
     updated_at: str
 
 
+class NotesPage(BaseModel):
+    items: list[Note]
+    next_cursor: str | None = None
+
+
 def create_app(db: Database | None = None) -> FastAPI:
     app = FastAPI(title="talos-demo notes")
     app.state.db = db or Database(os.environ.get("NOTES_DB", "notes.sqlite3"))
@@ -69,15 +74,18 @@ def create_app(db: Database | None = None) -> FastAPI:
             set_tags(db, note_id, body.tags)
         return load(db, note_id)
 
-    @app.get("/notes")
-    def list_notes(db: DB, tag: str | None = None) -> list[Note]:
+    @app.get("/notes", operation_id="list-notes")
+    def list_notes(
+        db: DB, tag: str | None = None, limit: Annotated[int, Query(ge=1, le=100)] = 50
+    ) -> NotesPage:
         if tag:
             rows = db.conn.execute(
-                "SELECT note_id AS id FROM tags WHERE tag = ? ORDER BY note_id", (tag.lower(),)
+                "SELECT note_id AS id FROM tags WHERE tag = ? ORDER BY note_id LIMIT ?",
+                (tag.lower(), limit),
             )
         else:
-            rows = db.conn.execute("SELECT id FROM notes ORDER BY id")
-        return [load(db, r["id"]) for r in rows.fetchall()]
+            rows = db.conn.execute("SELECT id FROM notes ORDER BY id LIMIT ?", (limit,))
+        return NotesPage(items=[load(db, r["id"]) for r in rows.fetchall()])
 
     @app.get("/notes/search")
     def search(db: DB, q: Annotated[str, Query(min_length=1)]) -> list[Note]:
