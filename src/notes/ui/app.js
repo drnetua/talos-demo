@@ -23,9 +23,34 @@ function renderNotes(note) {
   for (const tag of note.tags) {
     const chip = document.createElement("span");
     chip.className = "tag";
-    chip.textContent = tag;
+    chip.append(tag);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "remove-tag";
+    remove.setAttribute("aria-label", "Remove tag " + tag);
+    remove.addEventListener("click", () =>
+      changeTags(note.id, (list) => list.filter((item) => item !== tag)),
+    );
+    chip.appendChild(remove);
     tags.appendChild(chip);
   }
+  const addForm = document.createElement("form");
+  addForm.className = "add-tag-form";
+  addForm.noValidate = true;
+  const addInput = document.createElement("input");
+  addInput.type = "text";
+  addInput.autocomplete = "off";
+  addInput.setAttribute("aria-label", "New tag");
+  const addButton = document.createElement("button");
+  addButton.type = "submit";
+  addButton.textContent = "Add tag";
+  addForm.append(addInput, addButton);
+  addForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const tag = addInput.value.trim();
+    if (tag === "") return;
+    changeTags(note.id, (list) => [...list, tag]);
+  });
   const edit = document.createElement("button");
   edit.type = "button";
   edit.className = "edit-note";
@@ -36,7 +61,8 @@ function renderNotes(note) {
   del.className = "delete-note";
   del.textContent = "Delete";
   del.addEventListener("click", () => askDelete(note.id));
-  li.append(title, body, tags, edit, del);
+  li.append(title, body, tags, addForm, edit, del);
+  setTagControls(li, editingId === note.id);
   return li;
 }
 
@@ -130,6 +156,53 @@ function rowOf(id) {
   return listEl.querySelector('li[data-id="' + id + '"]');
 }
 
+function setTagControls(row, disabled) {
+  for (const el of row.querySelectorAll(".remove-tag, .add-tag-form input, .add-tag-form button")) {
+    el.disabled = disabled;
+  }
+}
+
+function syncTagControls() {
+  for (const row of listEl.querySelectorAll("li.note")) {
+    setTagControls(row, Number(row.dataset.id) === editingId);
+  }
+}
+
+async function changeTags(id, mutate) {
+  const row = rowOf(id);
+  if (!row || id === editingId) return;
+  setTagControls(row, true);
+  try {
+    const got = await fetch("/notes/" + id);
+    if (got.status === 404) {
+      removeRow(id);
+      messageEl.textContent = "This note no longer exists";
+      return;
+    }
+    if (!got.ok) throw new Error("request failed");
+    const note = await got.json();
+    const response = await fetch("/notes/" + id, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: note.title, body: note.body, tags: mutate(note.tags) }),
+    });
+    if (response.status === 200) {
+      const current = rowOf(id);
+      if (current) current.replaceWith(renderNotes(await response.json()));
+      messageEl.textContent = "";
+    } else if (response.status === 404) {
+      removeRow(id);
+      messageEl.textContent = "This note no longer exists";
+    } else {
+      throw new Error("request failed");
+    }
+  } catch (err) {
+    messageEl.textContent = "The action did not succeed.";
+    const current = rowOf(id);
+    if (current) setTagControls(current, id === editingId);
+  }
+}
+
 function removeRow(id) {
   const row = rowOf(id);
   if (row) row.remove();
@@ -176,6 +249,7 @@ function closeEdit() {
   editFormEl.reset();
   editMessageEl.textContent = "";
   editingId = null;
+  syncTagControls();
 }
 
 async function openNote(id) {
@@ -198,6 +272,7 @@ async function openNote(id) {
     discardEl.hidden = true;
     pendingAction = null;
     editFormEl.hidden = false;
+    syncTagControls();
     editTitleEl.focus();
   } catch (err) {
     messageEl.textContent = "The action did not succeed.";
