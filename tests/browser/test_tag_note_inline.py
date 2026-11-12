@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import httpx
 from playwright.sync_api import Page, Route, expect
 
@@ -128,4 +130,9 @@ def test_remove_control_shows_times_sign(page: Page, live_server: str, seed: See
     remove = page.locator("#notes li .remove-tag")
     expect(remove).to_have_text("\u00d7")
     assert "\ufffd" not in remove.inner_text()
+    before = remove.evaluate("el => getComputedStyle(el, '::before').content")
+    assert before in ("none", '""')
+    assert remove.get_attribute("aria-label") == "Remove tag work"
     expect(page.get_by_role("button", name="Remove tag work")).to_be_visible()
+    css = Path("src/notes/ui/app.css").read_bytes()
+    assert b"\x00" not in css
