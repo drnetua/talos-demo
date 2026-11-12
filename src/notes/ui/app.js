@@ -31,7 +31,12 @@ function renderNotes(note) {
   edit.className = "edit-note";
   edit.textContent = "Edit";
   edit.addEventListener("click", () => requestLeave(() => openNote(note.id)));
-  li.append(title, body, tags, edit);
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "delete-note";
+  del.textContent = "Delete";
+  del.addEventListener("click", () => askDelete(note.id));
+  li.append(title, body, tags, edit, del);
   return li;
 }
 
@@ -237,11 +242,54 @@ async function saveEdit(event) {
   }
 }
 
+const deleteEl = document.getElementById("delete-confirm");
+const confirmDeleteEl = document.getElementById("confirm-delete");
+let pendingDeleteId = null;
+
+function askDelete(id) {
+  pendingDeleteId = id;
+  deleteEl.hidden = false;
+  confirmDeleteEl.focus();
+}
+
+function cancelDelete() {
+  pendingDeleteId = null;
+  deleteEl.hidden = true;
+}
+
+async function confirmDelete() {
+  const id = pendingDeleteId;
+  if (id === null) return;
+  confirmDeleteEl.disabled = true;
+  try {
+    const response = await fetch("/notes/" + id, { method: "DELETE" });
+    if (response.status === 204 || response.status === 404) {
+      if (editingId === id) closeEdit();
+      removeRow(id);
+      if (response.status === 404) messageEl.textContent = "This note no longer exists";
+      cancelDelete();
+    } else {
+      cancelDelete();
+      messageEl.textContent = "The action did not succeed.";
+    }
+  } catch (err) {
+    cancelDelete();
+    messageEl.textContent = "The action did not succeed.";
+  } finally {
+    confirmDeleteEl.disabled = false;
+  }
+}
+
 formEl.addEventListener("submit", createNote);
 editFormEl.addEventListener("submit", saveEdit);
 document.getElementById("edit-close").addEventListener("click", () => requestLeave(closeEdit));
 document.getElementById("keep-editing").addEventListener("click", keepEditing);
 document.getElementById("discard-edits").addEventListener("click", discardEdits);
+confirmDeleteEl.addEventListener("click", confirmDelete);
+document.getElementById("cancel-delete").addEventListener("click", cancelDelete);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !deleteEl.hidden) cancelDelete();
+});
 window.addEventListener("beforeunload", (event) => {
   if (isDirty()) {
     event.preventDefault();

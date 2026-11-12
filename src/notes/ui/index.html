@@ -42,6 +42,11 @@
       <button id="keep-editing" type="button">Keep editing</button>
       <button id="discard-edits" type="button">Discard edits</button>
     </div>
+    <div id="delete-confirm" role="alertdialog" aria-labelledby="delete-text" hidden>
+      <p id="delete-text">Delete this note permanently?</p>
+      <button id="confirm-delete" type="button">Delete note</button>
+      <button id="cancel-delete" type="button">Cancel</button>
+    </div>
     <p id="message" role="status">Loading notes…</p>
     <ul id="notes"></ul>
     <button id="load-more" type="button" hidden>Load more</button>

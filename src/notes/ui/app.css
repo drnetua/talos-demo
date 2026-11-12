@@ -21,3 +21,7 @@ button:disabled { cursor: progress; opacity: 0.6; }
 #discard-confirm[hidden] { display: none; }
 #discard-confirm p { margin: 0 0 0.5rem; }
 .edit-note { padding: 0.25rem 0.75rem; margin-top: 0.5rem; }
+#delete-confirm { margin-bottom: 1rem; padding: 0.75rem; background: #fdecea; border: 1px solid #b00020; border-radius: 6px; }
+#delete-confirm[hidden] { display: none; }
+#delete-confirm p { margin: 0 0 0.5rem; }
+.delete-note { padding: 0.25rem 0.75rem; margin-top: 0.5rem; margin-left: 0.5rem; }
