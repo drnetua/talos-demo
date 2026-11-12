@@ -4,10 +4,11 @@ import csv
 import io
 import json
 import os
+from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from notes.cursor import decode_cursor, encode_cursor, get_secret
@@ -22,6 +23,11 @@ EXPORT_DESCRIPTION = (
     "apostrophe (') so spreadsheets do not treat it as a formula; other values are exported "
     "unchanged. Stored notes are not changed."
 )
+UI_DIR = Path(__file__).parent / "ui"
+UI_ASSETS = {"app.css": "text/css", "app.js": "text/javascript"}
+UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+CROSS_SITE_DETAIL = "cross-site request rejected"
+DEFAULT_PORTS = {"http": "80", "https": "443"}
 EXPORT_FIELDS = ("id", "title", "body", "tags", "created_at", "updated_at")
 
 
@@ -51,10 +57,41 @@ def capture_notes(db: Database, tag: str | None) -> list[dict[str, Any]]:
     return db.snapshot(tag)
 
 
+def normalise_origin(scheme: str, host: str) -> str:
+    """Scheme and host[:port] lower-cased, with the default port dropped."""
+    host = host.lower()
+    default = DEFAULT_PORTS.get(scheme.lower())
+    if default and host.endswith(f":{default}"):
+        host = host[: -len(f":{default}")]
+    return f"{scheme.lower()}://{host}"
+
+
+def is_cross_site(request: Request) -> bool:
+    """Decision order: Sec-Fetch-Site, then Origin, else pass (curl and scripts)."""
+    fetch_site = request.headers.get("sec-fetch-site")
+    if fetch_site is not None:
+        return fetch_site.strip().lower() == "cross-site"
+    origin = request.headers.get("origin")
+    if origin is None:
+        return False
+    scheme, sep, host = origin.strip().partition("://")
+    if not sep:
+        return True
+    own = normalise_origin(request.url.scheme, request.headers.get("host", ""))
+    return normalise_origin(scheme, host) != own
+
+
 def create_app(db: Database | None = None) -> FastAPI:
     app = FastAPI(title="talos-demo notes")
     app.state.db = db or Database(os.environ.get("NOTES_DB", "notes.sqlite3"))
     cursor_secret = get_secret()
+
+    @app.middleware("http")
+    async def reject_cross_site_writes(request: Request, call_next: Any) -> Response:
+        if request.method in UNSAFE_METHODS and is_cross_site(request):
+            return JSONResponse(status_code=403, content={"detail": CROSS_SITE_DETAIL})
+        response: Response = await call_next(request)
+        return response
 
     def get_db() -> Database:
         database: Database = app.state.db
@@ -85,6 +122,21 @@ def create_app(db: Database | None = None) -> FastAPI:
         db.conn.execute("DELETE FROM tags WHERE note_id = ?", (note_id,))
         for tag in sorted({t.strip().lower() for t in tags if t.strip()}):
             db.conn.execute("INSERT INTO tags (note_id, tag) VALUES (?, ?)", (note_id, tag))
+
+    @app.get("/", include_in_schema=False)
+    def ui_page() -> FileResponse:
+        return FileResponse(
+            UI_DIR / "index.html", media_type="text/html", headers={"Cache-Control": "no-cache"}
+        )
+
+    @app.get("/ui/{asset}", include_in_schema=False)
+    def ui_asset(asset: str) -> FileResponse:
+        media_type = UI_ASSETS.get(asset)
+        if media_type is None:
+            raise HTTPException(404, "asset not found")
+        return FileResponse(
+            UI_DIR / asset, media_type=media_type, headers={"Cache-Control": "no-cache"}
+        )
 
     @app.get("/health")
     def health() -> dict[str, str]:

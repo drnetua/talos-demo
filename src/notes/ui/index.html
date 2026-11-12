@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Notes</title>
+  <link rel="stylesheet" href="/ui/app.css">
+</head>
+<body>
+  <main>
+    <h1>Notes</h1>
+    <form id="create-form" novalidate>
+      <label>Title (required, at most 200 characters)
+        <input id="note-title" type="text" maxlength="200" autocomplete="off">
+      </label>
+      <label>Body (optional)
+        <textarea id="note-body" rows="3"></textarea>
+      </label>
+      <label>Tags (optional, separated by commas)
+        <input id="note-tags" type="text" autocomplete="off">
+      </label>
+      <button id="save" type="submit">Save</button>
+      <p id="form-message" role="alert"></p>
+    </form>
+    <form id="edit-form" novalidate hidden>
+      <h2>Edit note</h2>
+      <label>Note name (required, at most 200 characters)
+        <input id="edit-title" type="text" maxlength="200" autocomplete="off">
+      </label>
+      <label>Note text (optional)
+        <textarea id="edit-body" rows="3"></textarea>
+      </label>
+      <label>Labels (optional, separated by commas)
+        <input id="edit-tags" type="text" autocomplete="off">
+      </label>
+      <button id="edit-save" type="submit">Save</button>
+      <button id="edit-close" type="button">Close</button>
+      <p id="edit-message" role="alert"></p>
+    </form>
+    <div id="discard-confirm" role="alertdialog" aria-labelledby="discard-text" hidden>
+      <p id="discard-text">Discard your unsaved changes?</p>
+      <button id="keep-editing" type="button">Keep editing</button>
+      <button id="discard-edits" type="button">Discard edits</button>
+    </div>
+    <div id="delete-confirm" role="alertdialog" aria-labelledby="delete-text" hidden>
+      <p id="delete-text">Delete this note permanently?</p>
+      <button id="confirm-delete" type="button">Delete note</button>
+      <button id="cancel-delete" type="button">Cancel</button>
+    </div>
+    <form id="search-form" role="search" novalidate>
+      <input id="search-input" type="text" aria-label="Search notes" autocomplete="off">
+      <button id="search-submit" type="submit">Search</button>
+    </form>
+    <section id="tags-area">
+      <h2>Tags</h2>
+      <ul id="tags"></ul>
+      <p id="tags-empty" hidden>No tags yet</p>
+    </section>
+    <div id="filter-bar" hidden>
+      <span>Filtered by tag: <strong id="filter-tag"></strong></span>
+      <button id="clear-filter" type="button">Clear filter</button>
+    </div>
+    <div id="search-bar" hidden>
+      <span>Search: <strong id="search-text"></strong></span>
+      <button id="clear-search" type="button">Clear search</button>
+    </div>
+    <p id="message" role="status">Loading notes…</p>
+    <ul id="notes"></ul>
+    <button id="load-more" type="button" hidden>Load more</button>
+  </main>
+  <script src="/ui/app.js"></script>
+</body>
+</html>
