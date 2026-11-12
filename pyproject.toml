@@ -24,7 +24,8 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM"]
 
 [tool.mypy]
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "acceptance"]
 
 [tool.pytest.ini_options]
 addopts = "--cov=notes --cov-fail-under=80"
+testpaths = ["tests"]
