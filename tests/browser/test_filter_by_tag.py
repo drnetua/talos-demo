@@ -85,3 +85,66 @@ def test_click_count(page: Page, live_server: str, seed: Seed) -> None:
     _filter_button(page, "a").click()
     expect(page.locator("#notes li")).to_have_count(1)
     assert page.evaluate("window.clicks") <= 3
+
+
+def _remove_tag(page: Page, row_index: int, tag: str) -> None:
+    page.locator("#notes li").nth(row_index).get_by_role("button", name=f"Remove tag {tag}").click()
+
+
+def test_remove_filtered_tag_drops_note(page: Page, live_server: str, seed: Seed) -> None:
+    _tag_notes(live_server, seed, 2, [["a", "b"], ["a"]])
+    page.goto(live_server)
+    _filter_button(page, "a").click()
+    expect(page.locator("#notes li")).to_have_count(2)
+    _remove_tag(page, 0, "a")
+    expect(page.locator("#notes li")).to_have_count(1)
+    expect(page.locator("#tags button")).to_have_text(["a (1)", "b (1)"])
+
+
+def test_remove_last_use_clears_filter(page: Page, live_server: str, seed: Seed) -> None:
+    _tag_notes(live_server, seed, 2, [["a"], ["b"]])
+    page.goto(live_server)
+    _filter_button(page, "a").click()
+    expect(page.locator("#notes li")).to_have_count(1)
+    _remove_tag(page, 0, "a")
+    expect(page.locator("#filter-bar")).to_be_hidden()
+    expect(page.locator("#notes li")).to_have_count(2)
+    expect(page.locator("#tags button")).to_have_text(["b (1)"])
+
+
+def test_add_other_tag_keeps_note(page: Page, live_server: str, seed: Seed) -> None:
+    _tag_notes(live_server, seed, 1, [["a"]])
+    page.goto(live_server)
+    _filter_button(page, "a").click()
+    row = page.locator("#notes li").first
+    row.get_by_label("New tag").fill("c")
+    row.get_by_role("button", name="Add tag").click()
+    expect(page.locator("#notes li")).to_have_count(1)
+    expect(page.locator("#tags button")).to_have_text(["a (1)", "c (1)"])
+
+
+def test_counts_after_create_edit_delete(page: Page, live_server: str, seed: Seed) -> None:
+    _tag_notes(live_server, seed, 1, [["a"]])
+    page.goto(live_server)
+    page.locator("#note-title").fill("new")
+    page.locator("#note-tags").fill("a, z")
+    page.locator("#save").click()
+    expect(page.locator("#tags button")).to_have_text(["a (2)", "z (1)"])
+    new_row = page.locator("#notes li", has_text="new")
+    new_row.get_by_role("button", name="Edit").click()
+    page.locator("#edit-tags").fill("a")
+    page.locator("#edit-save").click()
+    expect(page.locator("#tags button")).to_have_text(["a (2)"])
+    new_row.get_by_role("button", name="Delete").click()
+    page.locator("#confirm-delete").click()
+    expect(page.locator("#tags button")).to_have_text(["a (1)"])
+
+
+def test_empty_filtered_message(page: Page, live_server: str, seed: Seed) -> None:
+    _tag_notes(live_server, seed, 2, [["a", "b"], ["a"]])
+    page.goto(live_server)
+    _filter_button(page, "b").click()
+    expect(page.locator("#notes li")).to_have_count(1)
+    page.locator("#note-title").fill("other")
+    page.locator("#save").click()
+    expect(page.locator("#notes li")).to_have_count(1)

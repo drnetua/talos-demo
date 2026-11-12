@@ -130,6 +130,7 @@ function renderTags(items) {
     tagsEl_.appendChild(li);
   }
   tagsEmptyEl.hidden = items.length > 0;
+  if (activeTag !== null && !items.some((item) => item.tag === activeTag)) clearFilter();
 }
 
 async function loadTags() {
@@ -195,9 +196,11 @@ async function createNote(event) {
       body: JSON.stringify({ title, body: bodyEl.value, tags: parseTags(tagsEl.value) }),
     });
     if (response.status === 201) {
-      appendNotes([await response.json()]);
+      const note = await response.json();
+      if (activeTag === null || note.tags.includes(activeTag)) appendNotes([note]);
       formEl.reset();
-      messageEl.textContent = "";
+      messageEl.textContent = shown.size === 0 ? emptyText() : "";
+      loadTags();
     } else if (response.status === 422) {
       formMessageEl.textContent = "Please enter a title of at most 200 characters.";
     } else {
@@ -256,9 +259,15 @@ async function changeTags(id, mutate) {
       body: JSON.stringify({ title: note.title, body: note.body, tags: mutate(note.tags) }),
     });
     if (response.status === 200) {
-      const current = rowOf(id);
-      if (current) current.replaceWith(renderNotes(await response.json()));
+      const updated = await response.json();
       messageEl.textContent = "";
+      if (activeTag !== null && !updated.tags.includes(activeTag)) {
+        removeRow(id);
+      } else {
+        const current = rowOf(id);
+        if (current) current.replaceWith(renderNotes(updated));
+      }
+      loadTags();
     } else if (response.status === 404) {
       removeRow(id);
       messageEl.textContent = "This note no longer exists";
@@ -368,8 +377,10 @@ async function saveEdit(event) {
     if (response.status === 200) {
       const note = await response.json();
       const row = rowOf(id);
-      if (row) row.replaceWith(renderNotes(note));
       closeEdit();
+      if (activeTag !== null && !note.tags.includes(activeTag)) removeRow(id);
+      else if (row) row.replaceWith(renderNotes(note));
+      loadTags();
     } else if (response.status === 404) {
       closeEdit();
       removeRow(id);
@@ -412,6 +423,7 @@ async function confirmDelete() {
       removeRow(id);
       if (response.status === 404) messageEl.textContent = "This note no longer exists";
       cancelDelete();
+      loadTags();
     } else {
       cancelDelete();
       messageEl.textContent = "The action did not succeed.";
