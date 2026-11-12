@@ -15,9 +15,7 @@ def _open(page: Page, live_server: str, seed: Seed) -> int:
     return note_id
 
 
-def test_edit_and_save_updates_row_without_reload(
-    page: Page, live_server: str, seed: Seed
-) -> None:
+def test_edit_and_save_updates_row_without_reload(page: Page, live_server: str, seed: Seed) -> None:
     note_id = _open(page, live_server, seed)
     page.evaluate("window.marker = 1")
     expect(page.locator("#edit-title")).to_have_value("note 0")
@@ -48,9 +46,7 @@ def test_empty_title_sends_no_put(page: Page, live_server: str, seed: Seed) -> N
     assert httpx.get(f"{live_server}/notes/{note_id}").json()["title"] == "note 0"
 
 
-def test_open_and_save_take_at_most_three_clicks(
-    page: Page, live_server: str, seed: Seed
-) -> None:
+def test_open_and_save_take_at_most_three_clicks(page: Page, live_server: str, seed: Seed) -> None:
     seed(1)
     page.goto(live_server)
     expect(page.locator("#notes li")).to_have_count(1)

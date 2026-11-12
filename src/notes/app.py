@@ -28,7 +28,7 @@ UI_ASSETS = {"app.css": "text/css", "app.js": "text/javascript"}
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 CROSS_SITE_DETAIL = "cross-site request rejected"
 DEFAULT_PORTS = {"http": "80", "https": "443"}
-EXPORT_FIELDS =("id", "title", "body", "tags", "created_at", "updated_at")
+EXPORT_FIELDS = ("id", "title", "body", "tags", "created_at", "updated_at")
 
 
 class NoteIn(BaseModel):
