@@ -63,5 +63,48 @@ async function loadPage() {
   }
 }
 
+function parseTags(text) {
+  return text.split(",").map((tag) => tag.trim()).filter((tag) => tag !== "");
+}
+
+const formEl = document.getElementById("create-form");
+const titleEl = document.getElementById("note-title");
+const bodyEl = document.getElementById("note-body");
+const tagsEl = document.getElementById("note-tags");
+const saveEl = document.getElementById("save");
+const formMessageEl = document.getElementById("form-message");
+
+async function createNote(event) {
+  event.preventDefault();
+  const title = titleEl.value.trim();
+  if (title === "") {
+    formMessageEl.textContent = "Please enter a title.";
+    return;
+  }
+  saveEl.disabled = true;
+  formMessageEl.textContent = "";
+  try {
+    const response = await fetch("/notes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, body: bodyEl.value, tags: parseTags(tagsEl.value) }),
+    });
+    if (response.status === 201) {
+      appendNotes([await response.json()]);
+      formEl.reset();
+      messageEl.textContent = "";
+    } else if (response.status === 422) {
+      formMessageEl.textContent = "Please enter a title of at most 200 characters.";
+    } else {
+      formMessageEl.textContent = "The action did not succeed.";
+    }
+  } catch (err) {
+    formMessageEl.textContent = "The action did not succeed.";
+  } finally {
+    saveEl.disabled = false;
+  }
+}
+
+formEl.addEventListener("submit", createNote);
 moreEl.addEventListener("click", loadPage);
 loadPage();
