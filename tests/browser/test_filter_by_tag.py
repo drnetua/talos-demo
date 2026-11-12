@@ -72,7 +72,7 @@ def test_special_character_tags(page: Page, live_server: str, seed: Seed) -> Non
         _filter_button(page, tag).click()
         expect(page.locator("#filter-tag")).to_have_text(tag)
         expect(page.locator("#notes li")).to_have_count(1)
-        expect(page.locator("#notes li .tag")).to_have_text([tag])
+        expect(page.locator("#notes li .tag")).to_have_text([tag + "\u00d7"])
 
 
 def test_click_count(page: Page, live_server: str, seed: Seed) -> None:

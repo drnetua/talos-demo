@@ -27,7 +27,7 @@ def _stored(live_server: str, note_id: int) -> list[str]:
 def test_add_shows_chip(page: Page, live_server: str, seed: Seed) -> None:
     note_id = _load(page, live_server, seed)
     _add(page, "work")
-    expect(page.locator("#notes li .tag")).to_have_text(["work"])
+    expect(page.locator("#notes li .tag")).to_have_text(["work\u00d7"])
     expect(page.locator("#edit-form")).to_be_hidden()
     assert _stored(live_server, note_id) == ["work"]
 
@@ -100,7 +100,7 @@ def test_errors_keep_tags(page: Page, live_server: str, seed: Seed) -> None:
         _add(page, "new")
         expected = "The action did not succeed." if not abort else "The service is unavailable."
         expect(page.locator("#message")).to_have_text(expected)
-        expect(page.locator("#notes li .tag")).to_have_text(["keep"])
+        expect(page.locator("#notes li .tag")).to_have_text(["keep\u00d7"])
         assert _stored(live_server, note_id) == ["keep"]
         page.unroute_all()
         httpx.delete(f"{live_server}/notes/{note_id}")
@@ -121,3 +121,11 @@ def test_disabled_while_note_is_open_for_edit(page: Page, live_server: str, seed
     expect(page.get_by_role("button", name="Remove tag a")).to_be_disabled()
     page.locator("#edit-close").click()
     expect(page.get_by_label("New tag")).to_be_enabled()
+
+
+def test_remove_control_shows_times_sign(page: Page, live_server: str, seed: Seed) -> None:
+    _load(page, live_server, seed, tags=["work"])
+    remove = page.locator("#notes li .remove-tag")
+    expect(remove).to_have_text("\u00d7")
+    assert "\ufffd" not in remove.inner_text()
+    expect(page.get_by_role("button", name="Remove tag work")).to_be_visible()

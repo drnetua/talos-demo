@@ -28,7 +28,7 @@ def test_title_body_tags_appear_without_reload(page: Page, live_server: str, see
     row = page.locator("#notes li").last
     expect(row).to_contain_text("Groceries")
     expect(row).to_contain_text("milk and eggs")
-    expect(row.locator(".tag")).to_have_text(["food", "home"])
+    expect(row.locator(".tag")).to_have_text(["food\u00d7", "home\u00d7"])
     created = httpx.get(f"{live_server}/notes").json()["items"][-1]
     assert created["title"] == "Groceries"
     assert created["tags"] == ["food", "home"]

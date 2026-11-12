@@ -37,6 +37,7 @@ function renderNotes(note) {
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "remove-tag";
+    remove.textContent = "\u00d7";
     remove.setAttribute("aria-label", "Remove tag " + tag);
     remove.addEventListener("click", () =>
       changeTags(note.id, (list) => list.filter((item) => item !== tag)),

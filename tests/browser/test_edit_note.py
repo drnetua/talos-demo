@@ -29,7 +29,7 @@ def test_edit_and_save_updates_row_without_reload(
     row = page.locator("#notes li").first
     expect(row.locator(".note-title")).to_have_text("New title")
     expect(row.locator(".note-body")).to_have_text("new body")
-    expect(row.locator(".tag")).to_have_text(["alpha", "beta"])
+    expect(row.locator(".tag")).to_have_text(["alpha\u00d7", "beta\u00d7"])
     assert page.evaluate("window.marker") == 1
     stored = httpx.get(f"{live_server}/notes/{note_id}").json()
     assert stored["title"] == "New title"
