@@ -1,7 +1,7 @@
 from collections.abc import Callable
 
 import httpx
-from playwright.sync_api import Page, Route, expect
+from playwright.sync_api import Dialog, Page, Route, expect
 
 from .conftest import Seed
 
@@ -103,6 +103,115 @@ def test_close_returns_to_list(page: Page, live_server: str, seed: Seed) -> None
     _open(page, live_server, seed)
     page.locator("#edit-title").fill("discarded")
     page.get_by_role("button", name="Close").click()
+    page.get_by_role("button", name="Discard edits").click()
     expect(page.locator("#edit-form")).to_be_hidden()
     expect(page.locator("#notes li")).to_have_count(2)
     expect(page.locator("#notes li .note-title").first).to_have_text("note 0")
+
+
+def _dirty_close(page: Page, live_server: str, seed: Seed) -> int:
+    note_id = _open(page, live_server, seed)
+    page.locator("#edit-title").fill("typed title")
+    page.locator("#edit-body").fill("typed body")
+    page.locator("#edit-tags").fill("a, b")
+    page.get_by_role("button", name="Close").click()
+    return note_id
+
+
+def test_dirty_close_asks_to_confirm(page: Page, live_server: str, seed: Seed) -> None:
+    _dirty_close(page, live_server, seed)
+    confirm = page.locator("#discard-confirm")
+    expect(confirm).to_be_visible()
+    expect(confirm).to_have_attribute("role", "alertdialog")
+    expect(confirm.get_by_role("button", name="Keep editing")).to_be_visible()
+    expect(confirm.get_by_role("button", name="Discard edits")).to_be_visible()
+    expect(page.locator("#edit-form")).to_be_visible()
+
+
+def test_keep_editing_preserves_fields(page: Page, live_server: str, seed: Seed) -> None:
+    _dirty_close(page, live_server, seed)
+    page.get_by_role("button", name="Keep editing").click()
+    expect(page.locator("#discard-confirm")).to_be_hidden()
+    expect(page.locator("#edit-form")).to_be_visible()
+    expect(page.locator("#edit-title")).to_have_value("typed title")
+    expect(page.locator("#edit-body")).to_have_value("typed body")
+    expect(page.locator("#edit-tags")).to_have_value("a, b")
+
+
+def test_discard_edits_closes_and_keeps_note(page: Page, live_server: str, seed: Seed) -> None:
+    note_id = _dirty_close(page, live_server, seed)
+    page.get_by_role("button", name="Discard edits").click()
+    expect(page.locator("#edit-form")).to_be_hidden()
+    expect(page.locator("#discard-confirm")).to_be_hidden()
+    expect(page.locator("#notes li .note-title").first).to_have_text("note 0")
+    assert httpx.get(f"{live_server}/notes/{note_id}").json()["title"] == "note 0"
+
+
+def test_clean_close_asks_nothing(page: Page, live_server: str, seed: Seed) -> None:
+    _open(page, live_server, seed)
+    page.get_by_role("button", name="Close").click()
+    expect(page.locator("#edit-form")).to_be_hidden()
+    expect(page.locator("#discard-confirm")).to_be_hidden()
+
+
+def test_reverting_to_original_values_asks_nothing(
+    page: Page, live_server: str, seed: Seed
+) -> None:
+    _open(page, live_server, seed)
+    page.locator("#edit-title").fill("changed")
+    page.locator("#edit-title").fill("note 0")
+    page.get_by_role("button", name="Close").click()
+    expect(page.locator("#edit-form")).to_be_hidden()
+    expect(page.locator("#discard-confirm")).to_be_hidden()
+
+
+def test_opening_another_note_is_guarded(page: Page, live_server: str, seed: Seed) -> None:
+    _open(page, live_server, seed)
+    page.locator("#edit-title").fill("unsaved")
+    page.locator("#notes li").nth(1).get_by_role("button", name="Edit").click()
+    expect(page.locator("#discard-confirm")).to_be_visible()
+    expect(page.locator("#edit-title")).to_have_value("unsaved")
+    page.get_by_role("button", name="Discard edits").click()
+    expect(page.locator("#edit-title")).to_have_value("note 1")
+    expect(page.locator("#discard-confirm")).to_be_hidden()
+
+
+def test_save_resets_baseline(page: Page, live_server: str, seed: Seed) -> None:
+    _open(page, live_server, seed)
+    page.locator("#edit-title").fill("saved")
+    page.locator("#edit-save").click()
+    expect(page.locator("#edit-form")).to_be_hidden()
+    page.locator("#notes li").first.get_by_role("button", name="Edit").click()
+    page.get_by_role("button", name="Close").click()
+    expect(page.locator("#edit-form")).to_be_hidden()
+    expect(page.locator("#discard-confirm")).to_be_hidden()
+
+
+def test_beforeunload_only_when_dirty(page: Page, live_server: str, seed: Seed) -> None:
+    _open(page, live_server, seed)
+    page.locator("#edit-title").fill("unsaved")
+    types: list[str] = []
+
+    def on_dialog(dialog: Dialog) -> None:
+        types.append(dialog.type)
+        dialog.dismiss()
+
+    page.on("dialog", on_dialog)
+    with page.expect_event("dialog"):
+        page.close(run_before_unload=True)
+    assert types == ["beforeunload"]
+    assert not page.is_closed()
+
+
+def test_no_beforeunload_when_clean(page: Page, live_server: str, seed: Seed) -> None:
+    _open(page, live_server, seed)
+    types: list[str] = []
+
+    def on_dialog(dialog: Dialog) -> None:
+        types.append(dialog.type)
+        dialog.dismiss()
+
+    page.on("dialog", on_dialog)
+    with page.expect_event("close"):
+        page.close(run_before_unload=True)
+    assert types == []

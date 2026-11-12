@@ -30,7 +30,7 @@ function renderNotes(note) {
   edit.type = "button";
   edit.className = "edit-note";
   edit.textContent = "Edit";
-  edit.addEventListener("click", () => openNote(note.id));
+  edit.addEventListener("click", () => requestLeave(() => openNote(note.id)));
   li.append(title, body, tags, edit);
   return li;
 }
@@ -116,7 +116,10 @@ const editBodyEl = document.getElementById("edit-body");
 const editTagsEl = document.getElementById("edit-tags");
 const editSaveEl = document.getElementById("edit-save");
 const editMessageEl = document.getElementById("edit-message");
+const discardEl = document.getElementById("discard-confirm");
 let editingId = null;
+let baseline = null;
+let pendingAction = null;
 
 function rowOf(id) {
   return listEl.querySelector('li[data-id="' + id + '"]');
@@ -129,7 +132,41 @@ function removeRow(id) {
   if (shown.size === 0 && messageEl.textContent === "") messageEl.textContent = "No notes yet";
 }
 
+function isDirty() {
+  if (editingId === null || baseline === null) return false;
+  return (
+    editTitleEl.value !== baseline.title ||
+    editBodyEl.value !== baseline.body ||
+    JSON.stringify(parseTags(editTagsEl.value)) !== JSON.stringify(baseline.tags)
+  );
+}
+
+function requestLeave(action) {
+  if (!isDirty()) {
+    action();
+    return;
+  }
+  pendingAction = action;
+  discardEl.hidden = false;
+}
+
+function keepEditing() {
+  pendingAction = null;
+  discardEl.hidden = true;
+  editTitleEl.focus();
+}
+
+function discardEdits() {
+  const action = pendingAction;
+  pendingAction = null;
+  discardEl.hidden = true;
+  if (action) action();
+}
+
 function closeEdit() {
+  discardEl.hidden = true;
+  pendingAction = null;
+  baseline = null;
   editFormEl.hidden = true;
   editFormEl.reset();
   editMessageEl.textContent = "";
@@ -152,6 +189,9 @@ async function openNote(id) {
     editBodyEl.value = note.body;
     editTagsEl.value = note.tags.join(", ");
     editMessageEl.textContent = "";
+    baseline = { title: note.title, body: note.body, tags: parseTags(editTagsEl.value) };
+    discardEl.hidden = true;
+    pendingAction = null;
     editFormEl.hidden = false;
     editTitleEl.focus();
   } catch (err) {
@@ -199,6 +239,14 @@ async function saveEdit(event) {
 
 formEl.addEventListener("submit", createNote);
 editFormEl.addEventListener("submit", saveEdit);
-document.getElementById("edit-close").addEventListener("click", closeEdit);
+document.getElementById("edit-close").addEventListener("click", () => requestLeave(closeEdit));
+document.getElementById("keep-editing").addEventListener("click", keepEditing);
+document.getElementById("discard-edits").addEventListener("click", discardEdits);
+window.addEventListener("beforeunload", (event) => {
+  if (isDirty()) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+});
 moreEl.addEventListener("click", loadPage);
 loadPage();

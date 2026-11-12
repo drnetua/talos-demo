@@ -17,4 +17,7 @@ button:disabled { cursor: progress; opacity: 0.6; }
 #edit-form label { display: block; margin-bottom: 0.5rem; }
 #edit-form input, #edit-form textarea { display: block; width: 100%; box-sizing: border-box; font: inherit; padding: 0.4rem; margin-top: 0.2rem; }
 #edit-message { color: #b00020; margin: 0.5rem 0 0; }
+#discard-confirm { margin-bottom: 1rem; padding: 0.75rem; background: #fff4e5; border: 1px solid #b26a00; border-radius: 6px; }
+#discard-confirm[hidden] { display: none; }
+#discard-confirm p { margin: 0 0 0.5rem; }
 .edit-note { padding: 0.25rem 0.75rem; margin-top: 0.5rem; }

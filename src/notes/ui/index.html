@@ -37,6 +37,11 @@
       <button id="edit-close" type="button">Close</button>
       <p id="edit-message" role="alert"></p>
     </form>
+    <div id="discard-confirm" role="alertdialog" aria-labelledby="discard-text" hidden>
+      <p id="discard-text">Discard your unsaved changes?</p>
+      <button id="keep-editing" type="button">Keep editing</button>
+      <button id="discard-edits" type="button">Discard edits</button>
+    </div>
     <p id="message" role="status">Loading notes…</p>
     <ul id="notes"></ul>
     <button id="load-more" type="button" hidden>Load more</button>
