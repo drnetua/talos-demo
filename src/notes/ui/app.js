@@ -4,6 +4,7 @@ const shown = new Set();
 let cursor = null;
 let loading = false;
 let activeTag = null;
+let activeSearch = null;
 let generation = 0;
 
 const messageEl = document.getElementById("message");
@@ -82,6 +83,7 @@ function updateLoadMore() {
 }
 
 function emptyText() {
+  if (activeSearch !== null) return "No notes found";
   return activeTag === null ? "No notes yet" : "No notes with this tag";
 }
 
@@ -91,6 +93,16 @@ async function loadPage() {
   const mine = generation;
   updateLoadMore();
   try {
+    if (activeSearch !== null) {
+      const found = await fetch("/notes/search?q=" + encodeURIComponent(activeSearch));
+      if (!found.ok) throw new Error("request failed");
+      const items = await found.json();
+      if (mine !== generation) return;
+      appendNotes(items);
+      cursor = null;
+      messageEl.textContent = shown.size === 0 ? emptyText() : "";
+      return;
+    }
     const params = [];
     if (activeTag !== null) params.push("tag=" + encodeURIComponent(activeTag));
     if (cursor !== null) params.push("cursor=" + encodeURIComponent(cursor));
@@ -153,7 +165,40 @@ function resetList() {
   messageEl.textContent = "Loading notes…";
 }
 
+const searchFormEl = document.getElementById("search-form");
+const searchInputEl = document.getElementById("search-input");
+const searchBarEl = document.getElementById("search-bar");
+const searchTextEl = document.getElementById("search-text");
+
+function startSearch(text) {
+  const query = text.trim();
+  if (query === "") return;
+  activeTag = null;
+  filterBarEl.hidden = true;
+  filterTagEl.textContent = "";
+  activeSearch = query;
+  searchTextEl.textContent = query;
+  searchBarEl.hidden = false;
+  resetList();
+  return loadPage();
+}
+
+function clearSearch() {
+  activeSearch = null;
+  searchBarEl.hidden = true;
+  searchTextEl.textContent = "";
+  searchInputEl.value = "";
+  resetList();
+  return loadPage();
+}
+
 function applyFilter(tag) {
+  if (tag !== null) {
+    activeSearch = null;
+    searchBarEl.hidden = true;
+    searchTextEl.textContent = "";
+    searchInputEl.value = "";
+  }
   activeTag = tag;
   resetList();
   filterBarEl.hidden = tag === null;
@@ -197,7 +242,9 @@ async function createNote(event) {
     });
     if (response.status === 201) {
       const note = await response.json();
-      if (activeTag === null || note.tags.includes(activeTag)) appendNotes([note]);
+      if (activeSearch === null && (activeTag === null || note.tags.includes(activeTag))) {
+        appendNotes([note]);
+      }
       formEl.reset();
       messageEl.textContent = shown.size === 0 ? emptyText() : "";
       loadTags();
@@ -453,6 +500,11 @@ window.addEventListener("beforeunload", (event) => {
   }
 });
 moreEl.addEventListener("click", loadPage);
+searchFormEl.addEventListener("submit", (event) => {
+  event.preventDefault();
+  startSearch(searchInputEl.value);
+});
+document.getElementById("clear-search").addEventListener("click", clearSearch);
 document.getElementById("clear-filter").addEventListener("click", clearFilter);
 loadTags();
 loadPage();

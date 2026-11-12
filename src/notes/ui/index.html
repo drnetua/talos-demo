@@ -47,6 +47,10 @@
       <button id="confirm-delete" type="button">Delete note</button>
       <button id="cancel-delete" type="button">Cancel</button>
     </div>
+    <form id="search-form" role="search" novalidate>
+      <input id="search-input" type="text" aria-label="Search notes" autocomplete="off">
+      <button id="search-submit" type="submit">Search</button>
+    </form>
     <section id="tags-area">
       <h2>Tags</h2>
       <ul id="tags"></ul>
@@ -55,6 +59,10 @@
     <div id="filter-bar" hidden>
       <span>Filtered by tag: <strong id="filter-tag"></strong></span>
       <button id="clear-filter" type="button">Clear filter</button>
+    </div>
+    <div id="search-bar" hidden>
+      <span>Search: <strong id="search-text"></strong></span>
+      <button id="clear-search" type="button">Clear search</button>
     </div>
     <p id="message" role="status">Loading notes…</p>
     <ul id="notes"></ul>
