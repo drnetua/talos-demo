@@ -132,9 +132,7 @@ def create_app(db: Database | None = None) -> FastAPI:
             ids = [r["id"] for r in rows.fetchall()]
             page_ids = ids[:limit]
             next_cursor = (
-                encode_cursor(page_ids[-1], tag_filter, cursor_secret)
-                if len(ids) > limit
-                else None
+                encode_cursor(page_ids[-1], tag_filter, cursor_secret) if len(ids) > limit else None
             )
             return NotesPage(items=[load(db, i) for i in page_ids], next_cursor=next_cursor)
 
