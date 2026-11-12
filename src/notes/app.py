@@ -1,13 +1,28 @@
-"""HTTP API: notes CRUD, tags, search."""
+"""HTTP API: notes CRUD, tags, search, CSV export."""
 
+import csv
+import io
+import json
 import os
-from typing import Annotated
+from typing import Annotated, Any, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from notes.cursor import decode_cursor, encode_cursor, get_secret
 from notes.db import Database
+from notes.safe_text import safe_cell
+
+EXPORT_FAILURE_DETAIL = "Export could not be completed"
+EXPORT_DESCRIPTION = (
+    "Downloads one complete CSV of all notes or of a single tag, without pagination. "
+    "Safe text rule: a title, body or tags cell whose first character after any leading "
+    "whitespace or control characters is =, +, - or @ is exported with one leading "
+    "apostrophe (') so spreadsheets do not treat it as a formula; other values are exported "
+    "unchanged. Stored notes are not changed."
+)
+EXPORT_FIELDS = ("id", "title", "body", "tags", "created_at", "updated_at")
 
 
 class NoteIn(BaseModel):
@@ -22,9 +37,18 @@ class Note(NoteIn):
     updated_at: str
 
 
+class ExportErrorResponse(BaseModel):
+    detail: Literal["Export could not be completed"]
+
+
 class NotesPage(BaseModel):
     items: list[Note]
     next_cursor: str | None = None
+
+
+def capture_notes(db: Database, tag: str | None) -> list[dict[str, Any]]:
+    """Seam for the detached snapshot capture (tests wrap it)."""
+    return db.snapshot(tag)
 
 
 def create_app(db: Database | None = None) -> FastAPI:
@@ -68,13 +92,14 @@ def create_app(db: Database | None = None) -> FastAPI:
 
     @app.post("/notes", status_code=201)
     def create(body: NoteIn, db: DB) -> Note:
-        with db.tx() as conn:
-            cur = conn.execute(
-                "INSERT INTO notes (title, body) VALUES (?, ?)", (body.title, body.body)
-            )
-            note_id = int(cur.lastrowid or 0)
-            set_tags(db, note_id, body.tags)
-        return load(db, note_id)
+        with db.session():
+            with db.tx() as conn:
+                cur = conn.execute(
+                    "INSERT INTO notes (title, body) VALUES (?, ?)", (body.title, body.body)
+                )
+                note_id = int(cur.lastrowid or 0)
+                set_tags(db, note_id, body.tags)
+            return load(db, note_id)
 
     @app.get("/notes", operation_id="list-notes")
     def list_notes(
@@ -92,71 +117,191 @@ def create_app(db: Database | None = None) -> FastAPI:
                 raise HTTPException(422, "invalid page cursor") from None
             if cursor_tag != tag_filter:
                 raise HTTPException(422, "page cursor does not match the tag filter")
-        if tag_filter:
-            rows = db.conn.execute(
-                "SELECT note_id AS id FROM tags WHERE tag = ? AND note_id > ?"
-                " ORDER BY note_id LIMIT ?",
-                (tag_filter, position, limit + 1),
+        with db.session() as conn:
+            if tag_filter:
+                rows = conn.execute(
+                    "SELECT note_id AS id FROM tags WHERE tag = ? AND note_id > ?"
+                    " ORDER BY note_id LIMIT ?",
+                    (tag_filter, position, limit + 1),
+                )
+            else:
+                rows = conn.execute(
+                    "SELECT id FROM notes WHERE id > ? ORDER BY id LIMIT ?",
+                    (position, limit + 1),
+                )
+            ids = [r["id"] for r in rows.fetchall()]
+            page_ids = ids[:limit]
+            next_cursor = (
+                encode_cursor(page_ids[-1], tag_filter, cursor_secret) if len(ids) > limit else None
             )
-        else:
-            rows = db.conn.execute(
-                "SELECT id FROM notes WHERE id > ? ORDER BY id LIMIT ?", (position, limit + 1)
-            )
-        ids = [r["id"] for r in rows.fetchall()]
-        page_ids = ids[:limit]
-        next_cursor = (
-            encode_cursor(page_ids[-1], tag_filter, cursor_secret) if len(ids) > limit else None
-        )
-        return NotesPage(items=[load(db, i) for i in page_ids], next_cursor=next_cursor)
+            return NotesPage(items=[load(db, i) for i in page_ids], next_cursor=next_cursor)
 
     @app.get("/notes/search")
     def search(db: DB, q: Annotated[str, Query(min_length=1)]) -> list[Note]:
         like = f"%{q}%"
-        rows = db.conn.execute(
-            "SELECT id FROM notes WHERE title LIKE ? OR body LIKE ? ORDER BY id", (like, like)
+        with db.session() as conn:
+            rows = conn.execute(
+                "SELECT id FROM notes WHERE title LIKE ? OR body LIKE ? ORDER BY id",
+                (like, like),
+            )
+            return [load(db, r["id"]) for r in rows.fetchall()]
+
+    def export_notes(db: Database, selected: list[str], tag: str | None) -> Response:
+        columns = [field for field in EXPORT_FIELDS if field in selected]
+        try:
+            notes = capture_notes(db, tag)
+            return csv_response(columns, notes)
+        except Exception:
+            return JSONResponse(status_code=500, content={"detail": EXPORT_FAILURE_DETAIL})
+
+    def csv_response(columns: list[str], notes: list[dict[str, Any]]) -> Response:
+        output = io.StringIO(newline="")
+        writer = csv.writer(output, lineterminator="\r\n")
+        writer.writerow(columns)
+        for row in notes:
+            values = {field: str(row[field]) for field in columns if field != "tags"}
+            if "tags" in columns:
+                values["tags"] = json.dumps(row["tags"], separators=(",", ":"))
+            writer.writerow([safe_cell(values[field]) for field in columns])
+
+        return Response(
+            content=output.getvalue().encode(),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": 'attachment; filename="notes.csv"',
+                "Cache-Control": "no-store",
+            },
         )
-        return [load(db, r["id"]) for r in rows.fetchall()]
+
+    @app.get(
+        "/notes/export",
+        operation_id="export-notes",
+        description=EXPORT_DESCRIPTION,
+        responses={
+            200: {
+                "description": "Complete UTF-8 CSV with selected headings; may have zero records.",
+                "content": {"text/csv": {"schema": {"type": "string", "format": "binary"}}},
+                "headers": {
+                    "Content-Disposition": {
+                        "required": True,
+                        "schema": {"type": "string", "const": 'attachment; filename="notes.csv"'},
+                    },
+                    "Cache-Control": {
+                        "required": True,
+                        "schema": {"type": "string", "const": "no-store"},
+                    },
+                },
+            },
+            500: {
+                "description": "Export could not be completed; no attachment.",
+                "model": ExportErrorResponse,
+            },
+            422: {
+                "description": "Invalid field selection or repeated tag; no attachment.",
+                "content": {
+                    "application/json": {
+                        "schema": {"$ref": "#/components/schemas/HTTPValidationError"}
+                    }
+                },
+            },
+        },
+    )
+    def export(
+        request: Request,
+        db: DB,
+        fields: Annotated[
+            list[str],
+            Query(
+                description="Repeat for each field; duplicate fields are exported once.",
+                json_schema_extra={
+                    "minItems": 1,
+                    "items": {"type": "string", "enum": list(EXPORT_FIELDS)},
+                },
+            ),
+        ],
+        tag: Annotated[
+            str | None,
+            Query(description="At most one tag; omitted or empty selects all notes."),
+        ] = None,
+    ) -> Response:
+        if len(request.query_params.getlist("tag")) > 1:
+            raise HTTPException(
+                422,
+                detail=[
+                    {
+                        "loc": ["query", "tag"],
+                        "msg": "Only one tag is supported",
+                        "type": "value_error",
+                    }
+                ],
+            )
+        errors = [
+            {
+                "loc": ["query", "fields", index],
+                "msg": (
+                    "Export field must not be empty"
+                    if not field
+                    else f"Unknown export field: {field}"
+                ),
+                "type": "value_error",
+                "input": field,
+            }
+            for index, field in enumerate(fields)
+            if field not in EXPORT_FIELDS
+        ]
+        if errors:
+            raise HTTPException(422, detail=errors)
+        return export_notes(db, fields, tag)
 
     @app.get("/notes/{note_id}")
     def get(note_id: int, db: DB) -> Note:
-        return load(db, note_id)
+        with db.session():
+            return load(db, note_id)
 
     @app.put("/notes/{note_id}")
     def update(note_id: int, body: NoteIn, db: DB) -> Note:
-        load(db, note_id)
-        with db.tx() as conn:
-            conn.execute(
-                "UPDATE notes SET title = ?, body = ?, updated_at = datetime('now') WHERE id = ?",
-                (body.title, body.body, note_id),
-            )
-            set_tags(db, note_id, body.tags)
-        return load(db, note_id)
+        with db.session():
+            load(db, note_id)
+            with db.tx() as conn:
+                conn.execute(
+                    "UPDATE notes SET title = ?, body = ?, updated_at = datetime('now') "
+                    "WHERE id = ?",
+                    (body.title, body.body, note_id),
+                )
+                set_tags(db, note_id, body.tags)
+            return load(db, note_id)
 
     @app.delete("/notes/{note_id}", status_code=204)
     def delete(note_id: int, db: DB) -> Response:
-        load(db, note_id)
-        with db.tx() as conn:
-            conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+        with db.session():
+            load(db, note_id)
+            with db.tx() as conn:
+                conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
         return Response(status_code=204)
 
     @app.get("/tags")
     def tags(db: DB) -> list[dict[str, object]]:
-        rows = db.conn.execute("SELECT tag, COUNT(*) AS n FROM tags GROUP BY tag ORDER BY tag")
+        with db.session() as conn:
+            rows = conn.execute(
+                "SELECT tag, COUNT(*) AS n FROM tags GROUP BY tag ORDER BY tag"
+            ).fetchall()
         return [{"tag": r["tag"], "count": r["n"]} for r in rows]
 
     @app.post("/notes/{note_id}/tags/{tag}", status_code=201)
     def add_tag(note_id: int, tag: str, db: DB) -> Note:
-        note = load(db, note_id)
-        with db.tx():
-            set_tags(db, note_id, [*note.tags, tag])
-        return load(db, note_id)
+        with db.session():
+            note = load(db, note_id)
+            with db.tx():
+                set_tags(db, note_id, [*note.tags, tag])
+            return load(db, note_id)
 
     @app.delete("/notes/{note_id}/tags/{tag}")
     def remove_tag(note_id: int, tag: str, db: DB) -> Note:
-        note = load(db, note_id)
-        with db.tx():
-            set_tags(db, note_id, [t for t in note.tags if t != tag.lower()])
-        return load(db, note_id)
+        with db.session():
+            note = load(db, note_id)
+            with db.tx():
+                set_tags(db, note_id, [t for t in note.tags if t != tag.lower()])
+            return load(db, note_id)
 
     return app
 
