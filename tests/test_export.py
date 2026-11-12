@@ -101,3 +101,12 @@ def test_export_schema_and_static_route_precedence() -> None:
     assert_download(c.get("/notes/export", params={"fields": "title"}))
     assert c.get(f"/notes/{note['id']}").json()["title"] == "Alpha"
     assert [item["title"] for item in c.get("/notes/search?q=first").json()] == ["Alpha"]
+
+
+def test_openapi_documents_export_failure() -> None:
+    spec = client().get("/openapi.json").json()
+    responses = spec["paths"]["/notes/export"]["get"]["responses"]
+    assert responses["500"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ExportErrorResponse"
+    }
+    assert {"200", "422"} <= set(responses)

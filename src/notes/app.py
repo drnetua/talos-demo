@@ -4,13 +4,15 @@ import csv
 import io
 import json
 import os
-from typing import Annotated
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from notes.db import Database
 
+EXPORT_FAILURE_DETAIL = "Export could not be completed"
 EXPORT_FIELDS = ("id", "title", "body", "tags", "created_at", "updated_at")
 
 
@@ -24,6 +26,15 @@ class Note(NoteIn):
     id: int
     created_at: str
     updated_at: str
+
+
+class ExportErrorResponse(BaseModel):
+    detail: Literal["Export could not be completed"]
+
+
+def capture_notes(db: Database, tag: str | None) -> list[dict[str, Any]]:
+    """Seam for the detached snapshot capture (tests wrap it)."""
+    return db.snapshot(tag)
 
 
 def create_app(db: Database | None = None) -> FastAPI:
@@ -99,29 +110,20 @@ def create_app(db: Database | None = None) -> FastAPI:
 
     def export_notes(db: Database, selected: list[str], tag: str | None) -> Response:
         columns = [field for field in EXPORT_FIELDS if field in selected]
-        with db.session() as conn:
-            if tag:
-                rows = conn.execute(
-                    """SELECT notes.* FROM notes JOIN tags ON tags.note_id = notes.id
-                    WHERE tags.tag = ? ORDER BY notes.id""",
-                    (tag.lower(),),
-                ).fetchall()
-            else:
-                rows = conn.execute("SELECT * FROM notes ORDER BY id").fetchall()
+        try:
+            notes = capture_notes(db, tag)
+            return csv_response(columns, notes)
+        except Exception:
+            return JSONResponse(status_code=500, content={"detail": EXPORT_FAILURE_DETAIL})
 
-            tags_by_id: dict[int, list[str]] = {}
-            for tag_row in conn.execute("SELECT note_id, tag FROM tags ORDER BY note_id, tag"):
-                tags_by_id.setdefault(tag_row["note_id"], []).append(tag_row["tag"])
-
+    def csv_response(columns: list[str], notes: list[dict[str, Any]]) -> Response:
         output = io.StringIO(newline="")
         writer = csv.writer(output, lineterminator="\r\n")
         writer.writerow(columns)
-        for row in rows:
+        for row in notes:
             values = {field: row[field] for field in columns if field != "tags"}
             if "tags" in columns:
-                values["tags"] = json.dumps(
-                    tags_by_id.get(row["id"], []), separators=(",", ":")
-                )
+                values["tags"] = json.dumps(row["tags"], separators=(",", ":"))
             writer.writerow([values[field] for field in columns])
 
         return Response(
@@ -150,6 +152,10 @@ def create_app(db: Database | None = None) -> FastAPI:
                         "schema": {"type": "string", "const": "no-store"},
                     },
                 },
+            },
+            500: {
+                "description": "Export could not be completed; no attachment.",
+                "model": ExportErrorResponse,
             },
             422: {
                 "description": "Invalid field selection or repeated tag; no attachment.",
