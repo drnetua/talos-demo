@@ -10,6 +10,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from notes.cursor import decode_cursor, encode_cursor, get_secret
 from notes.db import Database
 from notes.safe_text import safe_cell
 
@@ -40,6 +41,11 @@ class ExportErrorResponse(BaseModel):
     detail: Literal["Export could not be completed"]
 
 
+class NotesPage(BaseModel):
+    items: list[Note]
+    next_cursor: str | None = None
+
+
 def capture_notes(db: Database, tag: str | None) -> list[dict[str, Any]]:
     """Seam for the detached snapshot capture (tests wrap it)."""
     return db.snapshot(tag)
@@ -48,6 +54,7 @@ def capture_notes(db: Database, tag: str | None) -> list[dict[str, Any]]:
 def create_app(db: Database | None = None) -> FastAPI:
     app = FastAPI(title="talos-demo notes")
     app.state.db = db or Database(os.environ.get("NOTES_DB", "notes.sqlite3"))
+    cursor_secret = get_secret()
 
     def get_db() -> Database:
         database: Database = app.state.db
@@ -94,17 +101,42 @@ def create_app(db: Database | None = None) -> FastAPI:
                 set_tags(db, note_id, body.tags)
             return load(db, note_id)
 
-    @app.get("/notes")
-    def list_notes(db: DB, tag: str | None = None) -> list[Note]:
+    @app.get("/notes", operation_id="list-notes")
+    def list_notes(
+        db: DB,
+        tag: str | None = None,
+        limit: Annotated[int, Query(ge=1, le=100)] = 50,
+        cursor: Annotated[str, Query(json_schema_extra={"minLength": 1})] | None = None,
+    ) -> NotesPage:
+        tag_filter = tag.lower() if tag else None
+        position = 0
+        if cursor is not None:
+            try:
+                position, cursor_tag = decode_cursor(cursor, cursor_secret)
+            except (ValueError, TypeError):  # TypeError: non-ASCII text in compare_digest
+                raise HTTPException(422, "invalid page cursor") from None
+            if cursor_tag != tag_filter:
+                raise HTTPException(422, "page cursor does not match the tag filter")
         with db.session() as conn:
-            if tag:
+            if tag_filter:
                 rows = conn.execute(
-                    "SELECT note_id AS id FROM tags WHERE tag = ? ORDER BY note_id",
-                    (tag.lower(),),
+                    "SELECT note_id AS id FROM tags WHERE tag = ? AND note_id > ?"
+                    " ORDER BY note_id LIMIT ?",
+                    (tag_filter, position, limit + 1),
                 )
             else:
-                rows = conn.execute("SELECT id FROM notes ORDER BY id")
-            return [load(db, r["id"]) for r in rows.fetchall()]
+                rows = conn.execute(
+                    "SELECT id FROM notes WHERE id > ? ORDER BY id LIMIT ?",
+                    (position, limit + 1),
+                )
+            ids = [r["id"] for r in rows.fetchall()]
+            page_ids = ids[:limit]
+            next_cursor = (
+                encode_cursor(page_ids[-1], tag_filter, cursor_secret)
+                if len(ids) > limit
+                else None
+            )
+            return NotesPage(items=[load(db, i) for i in page_ids], next_cursor=next_cursor)
 
     @app.get("/notes/search")
     def search(db: DB, q: Annotated[str, Query(min_length=1)]) -> list[Note]:

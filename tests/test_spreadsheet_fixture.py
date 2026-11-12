@@ -37,7 +37,7 @@ def test_export_leaves_stored_notes_unchanged() -> None:
     client = TestClient(create_app(Database(":memory:")))
     for note in FIXTURE_NOTES:
         client.post("/notes", json=note)
-    before = client.get("/notes").json()
+    before = client.get("/notes").json()["items"]
     client.get("/notes/export", params={"fields": ["id", "title", "body", "tags"]})
-    assert client.get("/notes").json() == before
+    assert client.get("/notes").json()["items"] == before
     assert [n["title"] for n in before] == [n["title"] for n in FIXTURE_NOTES]
