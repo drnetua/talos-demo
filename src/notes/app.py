@@ -11,8 +11,16 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from notes.db import Database
+from notes.safe_text import safe_cell
 
 EXPORT_FAILURE_DETAIL = "Export could not be completed"
+EXPORT_DESCRIPTION = (
+    "Downloads one complete CSV of all notes or of a single tag, without pagination. "
+    "Safe text rule: a title, body or tags cell whose first character after any leading "
+    "whitespace or control characters is =, +, - or @ is exported with one leading "
+    "apostrophe (') so spreadsheets do not treat it as a formula; other values are exported "
+    "unchanged. Stored notes are not changed."
+)
 EXPORT_FIELDS = ("id", "title", "body", "tags", "created_at", "updated_at")
 
 
@@ -121,10 +129,10 @@ def create_app(db: Database | None = None) -> FastAPI:
         writer = csv.writer(output, lineterminator="\r\n")
         writer.writerow(columns)
         for row in notes:
-            values = {field: row[field] for field in columns if field != "tags"}
+            values = {field: str(row[field]) for field in columns if field != "tags"}
             if "tags" in columns:
                 values["tags"] = json.dumps(row["tags"], separators=(",", ":"))
-            writer.writerow([values[field] for field in columns])
+            writer.writerow([safe_cell(values[field]) for field in columns])
 
         return Response(
             content=output.getvalue().encode(),
@@ -138,6 +146,7 @@ def create_app(db: Database | None = None) -> FastAPI:
     @app.get(
         "/notes/export",
         operation_id="export-notes",
+        description=EXPORT_DESCRIPTION,
         responses={
             200: {
                 "description": "Complete UTF-8 CSV with selected headings; may have zero records.",

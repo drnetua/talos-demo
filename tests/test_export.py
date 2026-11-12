@@ -110,3 +110,52 @@ def test_openapi_documents_export_failure() -> None:
         "$ref": "#/components/schemas/ExportErrorResponse"
     }
     assert {"200", "422"} <= set(responses)
+
+
+FORMULAS = ["=1+1", "+1+1", "-1+1", "@SUM(1,1)", " =1+1", "\t=1+1", "\r=1+1"]
+
+
+def test_formula_like_cells_get_one_marker_and_stored_notes_are_unchanged() -> None:
+    c = client()
+    for value in FORMULAS:
+        c.post("/notes", json={"title": value, "body": value, "tags": ["t"]})
+    before = (c.get("/notes").json(), [c.get(f"/notes/{i}").json() for i in range(1, 8)])
+    response = c.get("/notes/export", params={"fields": EXPORT_FIELDS})
+    assert_download(response)
+    parsed = rows(response)
+    for value, row in zip(FORMULAS, parsed, strict=True):
+        assert row["title"] == "'" + value
+        assert row["body"] == "'" + value
+        assert row["tags"] == '["t"]'
+    after = (c.get("/notes").json(), [c.get(f"/notes/{i}").json() for i in range(1, 8)])
+    assert before == after
+
+
+def test_ordinary_and_special_values_are_faithful() -> None:
+    c = client()
+    values = [
+        "Meeting",
+        "\tindented",
+        "\nMeeting",
+        'a, "quoted"',
+        "line1\r\nline2\nx",
+        "Привіт 日本 😀",
+    ]
+    for value in values:
+        c.post("/notes", json={"title": value, "body": value})
+    c.post("/notes", json={"title": "Empty"})
+    c.post("/notes", json={"title": "Multi", "tags": ["b", "a", "c"]})
+    parsed = rows(c.get("/notes/export", params={"fields": EXPORT_FIELDS}))
+    for value, row in zip(values, parsed, strict=False):
+        assert row["title"] == value
+        assert row["body"] == value
+    assert parsed[len(values)]["body"] == ""
+    assert json.loads(parsed[-1]["tags"]) == ["a", "b", "c"]
+
+
+def test_openapi_describes_safe_text_rule() -> None:
+    description = create_app(Database(":memory:")).openapi()["paths"]["/notes/export"]["get"][
+        "description"
+    ]
+    assert "apostrophe" in description
+    assert "Stored notes are not changed" in description
