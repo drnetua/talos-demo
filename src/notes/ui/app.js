@@ -107,12 +107,19 @@ async function loadPage() {
     if (activeTag !== null) params.push("tag=" + encodeURIComponent(activeTag));
     if (cursor !== null) params.push("cursor=" + encodeURIComponent(cursor));
     const response = await fetch(params.length ? "/notes?" + params.join("&") : "/notes");
+    if (response.status === 422 && cursor !== null) {
+      if (mine !== generation) return;
+      resetList();
+      if (await loadPage()) messageEl.textContent = "The list was refreshed from the start.";
+      return;
+    }
     if (!response.ok) throw new Error("request failed");
     const page = await response.json();
     if (mine !== generation) return;
     appendNotes(page.items);
     cursor = page.next_cursor;
     messageEl.textContent = shown.size === 0 ? emptyText() : "";
+    return true;
   } catch (err) {
     if (mine === generation) messageEl.textContent = "The service is unavailable";
   } finally {
