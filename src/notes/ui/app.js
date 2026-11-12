@@ -3,6 +3,8 @@
 const shown = new Set();
 let cursor = null;
 let loading = false;
+let activeTag = null;
+let generation = 0;
 
 const messageEl = document.getElementById("message");
 const listEl = document.getElementById("notes");
@@ -79,24 +81,91 @@ function updateLoadMore() {
   moreEl.disabled = loading;
 }
 
+function emptyText() {
+  return activeTag === null ? "No notes yet" : "No notes with this tag";
+}
+
 async function loadPage() {
   if (loading) return;
   loading = true;
+  const mine = generation;
   updateLoadMore();
   try {
-    const url = cursor === null ? "/notes" : "/notes?cursor=" + encodeURIComponent(cursor);
-    const response = await fetch(url);
+    const params = [];
+    if (activeTag !== null) params.push("tag=" + encodeURIComponent(activeTag));
+    if (cursor !== null) params.push("cursor=" + encodeURIComponent(cursor));
+    const response = await fetch(params.length ? "/notes?" + params.join("&") : "/notes");
     if (!response.ok) throw new Error("request failed");
     const page = await response.json();
+    if (mine !== generation) return;
     appendNotes(page.items);
     cursor = page.next_cursor;
-    messageEl.textContent = shown.size === 0 ? "No notes yet" : "";
+    messageEl.textContent = shown.size === 0 ? emptyText() : "";
   } catch (err) {
-    messageEl.textContent = "The service is unavailable";
+    if (mine === generation) messageEl.textContent = "The service is unavailable";
   } finally {
-    loading = false;
-    updateLoadMore();
+    if (mine === generation) {
+      loading = false;
+      updateLoadMore();
+    }
   }
+}
+
+const tagsEl_ = document.getElementById("tags");
+const tagsEmptyEl = document.getElementById("tags-empty");
+const filterBarEl = document.getElementById("filter-bar");
+const filterTagEl = document.getElementById("filter-tag");
+
+function renderTags(items) {
+  tagsEl_.replaceChildren();
+  for (const item of items) {
+    const li = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "tag-filter";
+    button.textContent = item.tag + " (" + item.count + ")";
+    button.setAttribute("aria-label", "Filter by tag " + item.tag + ", " + item.count + " notes");
+    button.addEventListener("click", () => selectTag(item.tag));
+    li.appendChild(button);
+    tagsEl_.appendChild(li);
+  }
+  tagsEmptyEl.hidden = items.length > 0;
+}
+
+async function loadTags() {
+  try {
+    const response = await fetch("/tags");
+    if (!response.ok) throw new Error("request failed");
+    renderTags(await response.json());
+  } catch (err) {
+    tagsEmptyEl.textContent = "Tags are unavailable";
+    tagsEmptyEl.hidden = false;
+  }
+}
+
+function resetList() {
+  generation += 1;
+  loading = false;
+  shown.clear();
+  cursor = null;
+  listEl.replaceChildren();
+  messageEl.textContent = "Loading notes…";
+}
+
+function applyFilter(tag) {
+  activeTag = tag;
+  resetList();
+  filterBarEl.hidden = tag === null;
+  filterTagEl.textContent = tag === null ? "" : tag;
+  return loadPage();
+}
+
+function selectTag(tag) {
+  return applyFilter(tag);
+}
+
+function clearFilter() {
+  return applyFilter(null);
 }
 
 function parseTags(text) {
@@ -207,7 +276,7 @@ function removeRow(id) {
   const row = rowOf(id);
   if (row) row.remove();
   shown.delete(id);
-  if (shown.size === 0 && messageEl.textContent === "") messageEl.textContent = "No notes yet";
+  if (shown.size === 0 && messageEl.textContent === "") messageEl.textContent = emptyText();
 }
 
 function isDirty() {
@@ -372,4 +441,6 @@ window.addEventListener("beforeunload", (event) => {
   }
 });
 moreEl.addEventListener("click", loadPage);
+document.getElementById("clear-filter").addEventListener("click", clearFilter);
+loadTags();
 loadPage();
