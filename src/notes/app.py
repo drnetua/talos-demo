@@ -4,10 +4,11 @@ import csv
 import io
 import json
 import os
+from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from notes.cursor import decode_cursor, encode_cursor, get_secret
@@ -22,6 +23,8 @@ EXPORT_DESCRIPTION = (
     "apostrophe (') so spreadsheets do not treat it as a formula; other values are exported "
     "unchanged. Stored notes are not changed."
 )
+UI_DIR = Path(__file__).parent / "ui"
+UI_ASSETS = {"app.css": "text/css", "app.js": "text/javascript"}
 EXPORT_FIELDS = ("id", "title", "body", "tags", "created_at", "updated_at")
 
 
@@ -85,6 +88,21 @@ def create_app(db: Database | None = None) -> FastAPI:
         db.conn.execute("DELETE FROM tags WHERE note_id = ?", (note_id,))
         for tag in sorted({t.strip().lower() for t in tags if t.strip()}):
             db.conn.execute("INSERT INTO tags (note_id, tag) VALUES (?, ?)", (note_id, tag))
+
+    @app.get("/", include_in_schema=False)
+    def ui_page() -> FileResponse:
+        return FileResponse(
+            UI_DIR / "index.html", media_type="text/html", headers={"Cache-Control": "no-cache"}
+        )
+
+    @app.get("/ui/{asset}", include_in_schema=False)
+    def ui_asset(asset: str) -> FileResponse:
+        media_type = UI_ASSETS.get(asset)
+        if media_type is None:
+            raise HTTPException(404, "asset not found")
+        return FileResponse(
+            UI_DIR / asset, media_type=media_type, headers={"Cache-Control": "no-cache"}
+        )
 
     @app.get("/health")
     def health() -> dict[str, str]:
