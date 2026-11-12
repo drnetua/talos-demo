@@ -66,46 +66,52 @@ def create_app(db: Database | None = None) -> FastAPI:
 
     @app.post("/notes", status_code=201)
     def create(body: NoteIn, db: DB) -> Note:
-        with db.tx() as conn:
-            cur = conn.execute(
-                "INSERT INTO notes (title, body) VALUES (?, ?)", (body.title, body.body)
-            )
-            note_id = int(cur.lastrowid or 0)
-            set_tags(db, note_id, body.tags)
-        return load(db, note_id)
+        with db.session():
+            with db.tx() as conn:
+                cur = conn.execute(
+                    "INSERT INTO notes (title, body) VALUES (?, ?)", (body.title, body.body)
+                )
+                note_id = int(cur.lastrowid or 0)
+                set_tags(db, note_id, body.tags)
+            return load(db, note_id)
 
     @app.get("/notes")
     def list_notes(db: DB, tag: str | None = None) -> list[Note]:
-        if tag:
-            rows = db.conn.execute(
-                "SELECT note_id AS id FROM tags WHERE tag = ? ORDER BY note_id", (tag.lower(),)
-            )
-        else:
-            rows = db.conn.execute("SELECT id FROM notes ORDER BY id")
-        return [load(db, r["id"]) for r in rows.fetchall()]
+        with db.session() as conn:
+            if tag:
+                rows = conn.execute(
+                    "SELECT note_id AS id FROM tags WHERE tag = ? ORDER BY note_id",
+                    (tag.lower(),),
+                )
+            else:
+                rows = conn.execute("SELECT id FROM notes ORDER BY id")
+            return [load(db, r["id"]) for r in rows.fetchall()]
 
     @app.get("/notes/search")
     def search(db: DB, q: Annotated[str, Query(min_length=1)]) -> list[Note]:
         like = f"%{q}%"
-        rows = db.conn.execute(
-            "SELECT id FROM notes WHERE title LIKE ? OR body LIKE ? ORDER BY id", (like, like)
-        )
-        return [load(db, r["id"]) for r in rows.fetchall()]
+        with db.session() as conn:
+            rows = conn.execute(
+                "SELECT id FROM notes WHERE title LIKE ? OR body LIKE ? ORDER BY id",
+                (like, like),
+            )
+            return [load(db, r["id"]) for r in rows.fetchall()]
 
     def export_notes(db: Database, selected: list[str], tag: str | None) -> Response:
         columns = [field for field in EXPORT_FIELDS if field in selected]
-        if tag:
-            rows = db.conn.execute(
-                """SELECT notes.* FROM notes JOIN tags ON tags.note_id = notes.id
-                WHERE tags.tag = ? ORDER BY notes.id""",
-                (tag.lower(),),
-            ).fetchall()
-        else:
-            rows = db.conn.execute("SELECT * FROM notes ORDER BY id").fetchall()
+        with db.session() as conn:
+            if tag:
+                rows = conn.execute(
+                    """SELECT notes.* FROM notes JOIN tags ON tags.note_id = notes.id
+                    WHERE tags.tag = ? ORDER BY notes.id""",
+                    (tag.lower(),),
+                ).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM notes ORDER BY id").fetchall()
 
-        tags_by_id: dict[int, list[str]] = {}
-        for tag_row in db.conn.execute("SELECT note_id, tag FROM tags ORDER BY note_id, tag"):
-            tags_by_id.setdefault(tag_row["note_id"], []).append(tag_row["tag"])
+            tags_by_id: dict[int, list[str]] = {}
+            for tag_row in conn.execute("SELECT note_id, tag FROM tags ORDER BY note_id, tag"):
+                tags_by_id.setdefault(tag_row["note_id"], []).append(tag_row["tag"])
 
         output = io.StringIO(newline="")
         writer = csv.writer(output, lineterminator="\r\n")
@@ -204,44 +210,53 @@ def create_app(db: Database | None = None) -> FastAPI:
 
     @app.get("/notes/{note_id}")
     def get(note_id: int, db: DB) -> Note:
-        return load(db, note_id)
+        with db.session():
+            return load(db, note_id)
 
     @app.put("/notes/{note_id}")
     def update(note_id: int, body: NoteIn, db: DB) -> Note:
-        load(db, note_id)
-        with db.tx() as conn:
-            conn.execute(
-                "UPDATE notes SET title = ?, body = ?, updated_at = datetime('now') WHERE id = ?",
-                (body.title, body.body, note_id),
-            )
-            set_tags(db, note_id, body.tags)
-        return load(db, note_id)
+        with db.session():
+            load(db, note_id)
+            with db.tx() as conn:
+                conn.execute(
+                    "UPDATE notes SET title = ?, body = ?, updated_at = datetime('now') "
+                    "WHERE id = ?",
+                    (body.title, body.body, note_id),
+                )
+                set_tags(db, note_id, body.tags)
+            return load(db, note_id)
 
     @app.delete("/notes/{note_id}", status_code=204)
     def delete(note_id: int, db: DB) -> Response:
-        load(db, note_id)
-        with db.tx() as conn:
-            conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+        with db.session():
+            load(db, note_id)
+            with db.tx() as conn:
+                conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
         return Response(status_code=204)
 
     @app.get("/tags")
     def tags(db: DB) -> list[dict[str, object]]:
-        rows = db.conn.execute("SELECT tag, COUNT(*) AS n FROM tags GROUP BY tag ORDER BY tag")
+        with db.session() as conn:
+            rows = conn.execute(
+                "SELECT tag, COUNT(*) AS n FROM tags GROUP BY tag ORDER BY tag"
+            ).fetchall()
         return [{"tag": r["tag"], "count": r["n"]} for r in rows]
 
     @app.post("/notes/{note_id}/tags/{tag}", status_code=201)
     def add_tag(note_id: int, tag: str, db: DB) -> Note:
-        note = load(db, note_id)
-        with db.tx():
-            set_tags(db, note_id, [*note.tags, tag])
-        return load(db, note_id)
+        with db.session():
+            note = load(db, note_id)
+            with db.tx():
+                set_tags(db, note_id, [*note.tags, tag])
+            return load(db, note_id)
 
     @app.delete("/notes/{note_id}/tags/{tag}")
     def remove_tag(note_id: int, tag: str, db: DB) -> Note:
-        note = load(db, note_id)
-        with db.tx():
-            set_tags(db, note_id, [t for t in note.tags if t != tag.lower()])
-        return load(db, note_id)
+        with db.session():
+            note = load(db, note_id)
+            with db.tx():
+                set_tags(db, note_id, [t for t in note.tags if t != tag.lower()])
+            return load(db, note_id)
 
     return app
 

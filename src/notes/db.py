@@ -1,6 +1,7 @@
 """SQLite storage."""
 
 import sqlite3
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -27,8 +28,15 @@ class Database:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)
+        self._lock = threading.RLock()
+
+    @contextmanager
+    def session(self) -> Iterator[sqlite3.Connection]:
+        """Own the shared connection for a whole unit of work (reentrant)."""
+        with self._lock:
+            yield self.conn
 
     @contextmanager
     def tx(self) -> Iterator[sqlite3.Connection]:
-        with self.conn:
+        with self.session(), self.conn:
             yield self.conn
