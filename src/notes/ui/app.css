@@ -12,3 +12,9 @@ button:disabled { cursor: progress; opacity: 0.6; }
 #create-form label { display: block; margin-bottom: 0.5rem; }
 #create-form input, #create-form textarea { display: block; width: 100%; box-sizing: border-box; font: inherit; padding: 0.4rem; margin-top: 0.2rem; }
 #form-message { color: #b00020; margin: 0.5rem 0 0; }
+#edit-form { margin-bottom: 1rem; padding: 0.75rem; background: #fff; border: 1px solid #99a; border-radius: 6px; }
+#edit-form[hidden] { display: none; }
+#edit-form label { display: block; margin-bottom: 0.5rem; }
+#edit-form input, #edit-form textarea { display: block; width: 100%; box-sizing: border-box; font: inherit; padding: 0.4rem; margin-top: 0.2rem; }
+#edit-message { color: #b00020; margin: 0.5rem 0 0; }
+.edit-note { padding: 0.25rem 0.75rem; margin-top: 0.5rem; }

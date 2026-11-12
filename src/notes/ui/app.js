@@ -26,7 +26,12 @@ function renderNotes(note) {
     chip.textContent = tag;
     tags.appendChild(chip);
   }
-  li.append(title, body, tags);
+  const edit = document.createElement("button");
+  edit.type = "button";
+  edit.className = "edit-note";
+  edit.textContent = "Edit";
+  edit.addEventListener("click", () => openNote(note.id));
+  li.append(title, body, tags, edit);
   return li;
 }
 
@@ -105,6 +110,95 @@ async function createNote(event) {
   }
 }
 
+const editFormEl = document.getElementById("edit-form");
+const editTitleEl = document.getElementById("edit-title");
+const editBodyEl = document.getElementById("edit-body");
+const editTagsEl = document.getElementById("edit-tags");
+const editSaveEl = document.getElementById("edit-save");
+const editMessageEl = document.getElementById("edit-message");
+let editingId = null;
+
+function rowOf(id) {
+  return listEl.querySelector('li[data-id="' + id + '"]');
+}
+
+function removeRow(id) {
+  const row = rowOf(id);
+  if (row) row.remove();
+  shown.delete(id);
+  if (shown.size === 0 && messageEl.textContent === "") messageEl.textContent = "No notes yet";
+}
+
+function closeEdit() {
+  editFormEl.hidden = true;
+  editFormEl.reset();
+  editMessageEl.textContent = "";
+  editingId = null;
+}
+
+async function openNote(id) {
+  try {
+    const response = await fetch("/notes/" + id);
+    if (response.status === 404) {
+      closeEdit();
+      removeRow(id);
+      messageEl.textContent = "This note no longer exists";
+      return;
+    }
+    if (!response.ok) throw new Error("request failed");
+    const note = await response.json();
+    editingId = note.id;
+    editTitleEl.value = note.title;
+    editBodyEl.value = note.body;
+    editTagsEl.value = note.tags.join(", ");
+    editMessageEl.textContent = "";
+    editFormEl.hidden = false;
+    editTitleEl.focus();
+  } catch (err) {
+    messageEl.textContent = "The action did not succeed.";
+  }
+}
+
+async function saveEdit(event) {
+  event.preventDefault();
+  if (editingId === null) return;
+  const id = editingId;
+  const title = editTitleEl.value.trim();
+  if (title === "") {
+    editMessageEl.textContent = "Please enter a title.";
+    return;
+  }
+  editSaveEl.disabled = true;
+  editMessageEl.textContent = "";
+  try {
+    const response = await fetch("/notes/" + id, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, body: editBodyEl.value, tags: parseTags(editTagsEl.value) }),
+    });
+    if (response.status === 200) {
+      const note = await response.json();
+      const row = rowOf(id);
+      if (row) row.replaceWith(renderNotes(note));
+      closeEdit();
+    } else if (response.status === 404) {
+      closeEdit();
+      removeRow(id);
+      messageEl.textContent = "This note no longer exists";
+    } else if (response.status === 422) {
+      editMessageEl.textContent = "Please enter a title of at most 200 characters.";
+    } else {
+      editMessageEl.textContent = "The action did not succeed.";
+    }
+  } catch (err) {
+    editMessageEl.textContent = "The action did not succeed.";
+  } finally {
+    editSaveEl.disabled = false;
+  }
+}
+
 formEl.addEventListener("submit", createNote);
+editFormEl.addEventListener("submit", saveEdit);
+document.getElementById("edit-close").addEventListener("click", closeEdit);
 moreEl.addEventListener("click", loadPage);
 loadPage();
