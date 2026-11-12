@@ -25,7 +25,10 @@ EXPORT_DESCRIPTION = (
 )
 UI_DIR = Path(__file__).parent / "ui"
 UI_ASSETS = {"app.css": "text/css", "app.js": "text/javascript"}
-EXPORT_FIELDS = ("id", "title", "body", "tags", "created_at", "updated_at")
+UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+CROSS_SITE_DETAIL = "cross-site request rejected"
+DEFAULT_PORTS = {"http": "80", "https": "443"}
+EXPORT_FIELDS =("id", "title", "body", "tags", "created_at", "updated_at")
 
 
 class NoteIn(BaseModel):
@@ -54,10 +57,41 @@ def capture_notes(db: Database, tag: str | None) -> list[dict[str, Any]]:
     return db.snapshot(tag)
 
 
+def normalise_origin(scheme: str, host: str) -> str:
+    """Scheme and host[:port] lower-cased, with the default port dropped."""
+    host = host.lower()
+    default = DEFAULT_PORTS.get(scheme.lower())
+    if default and host.endswith(f":{default}"):
+        host = host[: -len(f":{default}")]
+    return f"{scheme.lower()}://{host}"
+
+
+def is_cross_site(request: Request) -> bool:
+    """Decision order: Sec-Fetch-Site, then Origin, else pass (curl and scripts)."""
+    fetch_site = request.headers.get("sec-fetch-site")
+    if fetch_site is not None:
+        return fetch_site.strip().lower() == "cross-site"
+    origin = request.headers.get("origin")
+    if origin is None:
+        return False
+    scheme, sep, host = origin.strip().partition("://")
+    if not sep:
+        return True
+    own = normalise_origin(request.url.scheme, request.headers.get("host", ""))
+    return normalise_origin(scheme, host) != own
+
+
 def create_app(db: Database | None = None) -> FastAPI:
     app = FastAPI(title="talos-demo notes")
     app.state.db = db or Database(os.environ.get("NOTES_DB", "notes.sqlite3"))
     cursor_secret = get_secret()
+
+    @app.middleware("http")
+    async def reject_cross_site_writes(request: Request, call_next: Any) -> Response:
+        if request.method in UNSAFE_METHODS and is_cross_site(request):
+            return JSONResponse(status_code=403, content={"detail": CROSS_SITE_DETAIL})
+        response: Response = await call_next(request)
+        return response
 
     def get_db() -> Database:
         database: Database = app.state.db
