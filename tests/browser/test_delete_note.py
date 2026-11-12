@@ -98,5 +98,5 @@ def test_network_failure_keeps_row(page: Page, live_server: str, seed: Seed) -> 
     _load(page, live_server, seed)
     page.locator("#notes li").first.get_by_role("button", name="Delete").click()
     page.locator("#confirm-delete").click()
-    expect(page.locator("#message")).to_have_text("The action did not succeed.")
+    expect(page.locator("#message")).to_have_text("The service is unavailable.")
     expect(page.locator("#notes li")).to_have_count(2)

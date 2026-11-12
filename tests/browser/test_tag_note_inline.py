@@ -98,7 +98,8 @@ def test_errors_keep_tags(page: Page, live_server: str, seed: Seed) -> None:
         _fail_method(page, method, abort)
         note_id = _load(page, live_server, seed, ["keep"])
         _add(page, "new")
-        expect(page.locator("#message")).to_have_text("The action did not succeed.")
+        expected = "The action did not succeed." if not abort else "The service is unavailable."
+        expect(page.locator("#message")).to_have_text(expected)
         expect(page.locator("#notes li .tag")).to_have_text(["keep"])
         assert _stored(live_server, note_id) == ["keep"]
         page.unroute_all()

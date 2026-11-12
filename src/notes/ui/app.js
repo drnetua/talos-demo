@@ -7,6 +7,13 @@ let activeTag = null;
 let activeSearch = null;
 let generation = 0;
 
+const REJECTED = "The action did not succeed.";
+const UNAVAILABLE = "The service is unavailable.";
+
+function failureText(err) {
+  return err instanceof TypeError ? UNAVAILABLE : REJECTED;
+}
+
 const messageEl = document.getElementById("message");
 const listEl = document.getElementById("notes");
 const moreEl = document.getElementById("load-more");
@@ -258,10 +265,10 @@ async function createNote(event) {
     } else if (response.status === 422) {
       formMessageEl.textContent = "Please enter a title of at most 200 characters.";
     } else {
-      formMessageEl.textContent = "The action did not succeed.";
+      formMessageEl.textContent = REJECTED;
     }
   } catch (err) {
-    formMessageEl.textContent = "The action did not succeed.";
+    formMessageEl.textContent = failureText(err);
   } finally {
     saveEl.disabled = false;
   }
@@ -305,7 +312,7 @@ async function changeTags(id, mutate) {
       messageEl.textContent = "This note no longer exists";
       return;
     }
-    if (!got.ok) throw new Error("request failed");
+    if (!got.ok) throw new Error("rejected");
     const note = await got.json();
     const response = await fetch("/notes/" + id, {
       method: "PUT",
@@ -326,10 +333,10 @@ async function changeTags(id, mutate) {
       removeRow(id);
       messageEl.textContent = "This note no longer exists";
     } else {
-      throw new Error("request failed");
+      throw new Error("rejected");
     }
   } catch (err) {
-    messageEl.textContent = "The action did not succeed.";
+    messageEl.textContent = failureText(err);
     const current = rowOf(id);
     if (current) setTagControls(current, id === editingId);
   }
@@ -393,7 +400,7 @@ async function openNote(id) {
       messageEl.textContent = "This note no longer exists";
       return;
     }
-    if (!response.ok) throw new Error("request failed");
+    if (!response.ok) throw new Error("rejected");
     const note = await response.json();
     editingId = note.id;
     editTitleEl.value = note.title;
@@ -407,7 +414,7 @@ async function openNote(id) {
     syncTagControls();
     editTitleEl.focus();
   } catch (err) {
-    messageEl.textContent = "The action did not succeed.";
+    messageEl.textContent = failureText(err);
   }
 }
 
@@ -442,10 +449,10 @@ async function saveEdit(event) {
     } else if (response.status === 422) {
       editMessageEl.textContent = "Please enter a title of at most 200 characters.";
     } else {
-      editMessageEl.textContent = "The action did not succeed.";
+      editMessageEl.textContent = REJECTED;
     }
   } catch (err) {
-    editMessageEl.textContent = "The action did not succeed.";
+    editMessageEl.textContent = failureText(err);
   } finally {
     editSaveEl.disabled = false;
   }
@@ -480,11 +487,11 @@ async function confirmDelete() {
       loadTags();
     } else {
       cancelDelete();
-      messageEl.textContent = "The action did not succeed.";
+      messageEl.textContent = REJECTED;
     }
   } catch (err) {
     cancelDelete();
-    messageEl.textContent = "The action did not succeed.";
+    messageEl.textContent = failureText(err);
   } finally {
     confirmDeleteEl.disabled = false;
   }
